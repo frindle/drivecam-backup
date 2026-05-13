@@ -2,7 +2,67 @@
 
 iPhone app that reads dashcam footage from a USB drive and uploads it to a Samba share on an Unraid NAS. Supports Tesla and Rivian (more vehicles easy to add).
 
-## How it works
+## Web Viewer
+
+A Docker-based web interface for viewing dashcam footage with timeline filtering, video playback, and thumbnail previews.
+
+### Features
+
+- **Multi-path support**: Scan footage from `/share` or `/data` Docker volume mounts
+- **Vehicle detection**: Automatically detects Tesla and Rivian footage from folder structure
+- **Event filtering**: Filter by vehicle type, event type (drivecam, activations, gear guard), camera angle, folder, and date range
+- **Timeline UI**: Dark theme interface with video player and thumbnail previews
+- **Gear Guard highlighting**: Amber badge for security event clips
+- **Video streaming**: HTTP Range support for seeking within videos
+- **Thumbnail caching**: FFmpeg-generated thumbnails with SQLite metadata cache
+
+### Quick Start
+
+```bash
+cd web
+docker-compose up -d
+```
+
+Access at `http://localhost:8000`
+
+### Docker Volume Mounts
+
+Choose one or both volume mounts depending on your setup:
+
+```yaml
+volumes:
+  # Option 1: Mount your NAS share
+  - /path/to/nas/share:/share:ro
+
+  # Option 2: Mount local data directory
+  - /path/to/local/data:/data:ro
+```
+
+### Environment Variables
+
+- `DATA_PATH`: Base path for dashcam footage (default: `/share`)
+- `HOST`: Host to bind to (default: `0.0.0.0`)
+- `PORT`: Port to bind to (default: `8000`)
+
+### Development
+
+```bash
+# Backend
+cd web/backend
+pip install -r requirements.txt
+python main.py
+
+# Frontend
+cd web/frontend
+npm install
+npm run dev
+```
+
+See `web/README.md` for full documentation.
+
+---
+
+## How it works (iOS App)
 
 1. Plug your dashcam USB drive into your iPhone via a USB-C adapter
 2. Open the app, tap **Select USB Drive**, and navigate to the drive root in Files

@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  drivecam-web:
+    build: .
+    container_name: drivecam-web
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount your NAS Samba share here.
+      # The left path is your local path — DO NOT change the right side (:ro is read-only).
+      #
+      # Option A: Single mount at /share (original path used by iPhone app)
+      #   macOS Samba mount:  /Volumes/DashCam:/share:ro
+      #   Linux mount point:   /mnt/dashcam:/share:ro
+      #
+      # Option B: Separate /share and /data mounts (if you organize clips differently)
+      #   - /path/to/footage:/share:ro    # e.g. TeslaCam / Rivian_DASHCAM root
+      #   - /path/to/other:/data:ro        # additional footage location
+      - /Volumes/DashCam:/share:ro
+      - /path/to/other/footage:/data:ro  # <-- replace with your actual path, or remove this line
+    environment:
+      - SHARE_PATH=/share
+      - DATA_PATH=/data
+      - STATIC_PATH=/app/backend/static
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

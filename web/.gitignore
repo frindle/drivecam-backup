@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.cache/
+*.pyc
+__pycache__/
+.env
+.DS_Store
+/backend/static/
+/backend/__pycache__/
+/tmp/drivecam_thumbnails/
+drivecam_cache.db
