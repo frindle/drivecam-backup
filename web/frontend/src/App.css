@@ -18,6 +18,22 @@
   --header-h: 56px;
 }
 
+/* Rivian theme: teal/cyan */
+:root[data-theme="rivian"] {
+  --accent: #00c2e0;
+  --surface: #1a222b;
+  --surface2: #223340;
+  --border: #2a4050;
+}
+
+/* Tesla theme: red */
+:root[data-theme="tesla"] {
+  --accent: #cc0000;
+  --surface: #1f1a1a;
+  --surface2: #2a2222;
+  --border: #3a2a2a;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg);
@@ -155,21 +171,23 @@ body {
   flex-wrap: wrap;
 }
 
-.filter-select, .filter-input {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 6px;
-  padding: 5px 10px;
-  font-family: inherit;
-  font-size: 0.8rem;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.15s;
-}
+ .filter-select, .filter-input, .theme-select {
+   background: var(--surface2);
+   border: 1px solid var(--border);
+   color: var(--text);
+   border-radius: 6px;
+   padding: 5px 10px;
+   font-family: inherit;
+   font-size: 0.8rem;
+   cursor: pointer;
+   outline: none;
+   transition: border-color 0.15s;
+ }
 
-.filter-select:focus, .filter-input:focus { border-color: var(--accent); }
-.filter-input[type="date"] { color-scheme: dark; }
+ .filter-select:focus, .filter-input:focus, .theme-select:focus { border-color: var(--accent); }
+ .filter-input[type="date"] { color-scheme: dark; }
+
+ .theme-select { min-width: 80px; text-align: center; font-weight: 500; }
 
 .date-sep { color: var(--text-muted); font-size: 0.8rem; }
 

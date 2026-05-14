@@ -66,8 +66,10 @@ export default function App() {
   const [health, setHealth] = useState(null)
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
-  const [thumbnails, setThumbnails] = useState({})
-  const [thumbnailLoading, setThumbnailLoading] = useState({})
+   const [thumbnails, setThumbnails] = useState({})
+   const [thumbnailLoading, setThumbnailLoading] = useState({})
+   const [selectedTheme, setSelectedTheme] = useState('auto') // 'auto', 'rivian', 'tesla'
+   const [currentTheme, setCurrentTheme] = useState('default') // 'default', 'rivian', 'tesla'
 
   const loadClips = useCallback(async () => {
     setLoading(true)
@@ -115,21 +117,45 @@ export default function App() {
     }
   }, [clips, thumbnails, thumbnailLoading])
 
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.key === 'Escape') setPlayingClip(null)
-      if (e.key === 'ArrowRight' && playingClip) {
-        const idx = clips.findIndex(c => c.id === playingClip.id)
-        if (idx < clips.length - 1) setPlayingClip(clips[idx + 1])
-      }
-      if (e.key === 'ArrowLeft' && playingClip) {
-        const idx = clips.findIndex(c => c.id === playingClip.id)
-        if (idx > 0) setPlayingClip(clips[idx - 1])
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [playingClip, clips])
+   useEffect(() => {
+     const handler = (e) => {
+       if (e.key === 'Escape') setPlayingClip(null)
+       if (e.key === 'ArrowRight' && playingClip) {
+         const idx = clips.findIndex(c => c.id === playingClip.id)
+         if (idx < clips.length - 1) setPlayingClip(clips[idx + 1])
+       }
+       if (e.key === 'ArrowLeft' && playingClip) {
+         const idx = clips.findIndex(c => c.id === playingClip.id)
+         if (idx > 0) setPlayingClip(clips[idx - 1])
+       }
+     }
+     window.addEventListener('keydown', handler)
+     return () => window.removeEventListener('keydown', handler)
+   }, [playingClip, clips])
+
+   // Theme logic: auto-detect based on vehicle filter, or manual override
+   useEffect(() => {
+     if (selectedTheme === 'auto') {
+       if (filterVehicle === 'rivian') {
+         setCurrentTheme('rivian')
+       } else if (filterVehicle === 'tesla') {
+         setCurrentTheme('tesla')
+       } else {
+         setCurrentTheme('default')
+       }
+     } else {
+       setCurrentTheme(selectedTheme)
+     }
+   }, [filterVehicle, selectedTheme])
+
+   // Apply theme to document
+   useEffect(() => {
+     if (currentTheme === 'default') {
+       document.documentElement.removeAttribute('data-theme')
+     } else {
+       document.documentElement.setAttribute('data-theme', currentTheme)
+     }
+   }, [currentTheme])
 
   const handleRescan = async () => {
     setScanning(true)
@@ -147,13 +173,23 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="header">
+       <header className="header">
         <div className="header-left">
           <span className="logo">🚗</span>
           <h1 className="title">DriveCam Viewer</h1>
           {health && <span className={`status-dot ${health.status}`} title={`${clipCount} clips cached`} />}
         </div>
         <div className="header-right">
+          <select
+            value={selectedTheme}
+            onChange={(e) => setSelectedTheme(e.target.value)}
+            className="theme-select"
+            title="Theme"
+          >
+            <option value="auto">Auto</option>
+            <option value="rivian">Rivian</option>
+            <option value="tesla">Tesla</option>
+          </select>
           <span className="clip-count">{clipCount} clips</span>
           {gearGuardCount > 0 && (
             <span className="badge gear-guard">{gearGuardCount} Gear Guard</span>
