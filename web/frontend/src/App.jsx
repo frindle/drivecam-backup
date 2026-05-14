@@ -68,8 +68,10 @@ export default function App() {
   const [scanning, setScanning] = useState(false)
    const [thumbnails, setThumbnails] = useState({})
    const [thumbnailLoading, setThumbnailLoading] = useState({})
-   const [selectedTheme, setSelectedTheme] = useState('auto') // 'auto', 'rivian', 'tesla'
-   const [currentTheme, setCurrentTheme] = useState('default') // 'default', 'rivian', 'tesla'
+   const [colorTheme, setColorTheme] = useState('auto') // 'auto', 'rivian', 'tesla'
+   const [darkMode, setDarkMode] = useState('auto') // 'auto', 'light', 'dark'
+   const [currentColorTheme, setCurrentColorTheme] = useState('default') // 'default', 'rivian', 'tesla'
+   const [isDark, setIsDark] = useState(true) // default to dark for dashcam footage
 
   const loadClips = useCallback(async () => {
     setLoading(true)
@@ -133,29 +135,41 @@ export default function App() {
      return () => window.removeEventListener('keydown', handler)
    }, [playingClip, clips])
 
-   // Theme logic: auto-detect based on vehicle filter, or manual override
+   // Compute effective color theme based on vehicle filter and colorTheme setting
    useEffect(() => {
-     if (selectedTheme === 'auto') {
-       if (filterVehicle === 'rivian') {
-         setCurrentTheme('rivian')
-       } else if (filterVehicle === 'tesla') {
-         setCurrentTheme('tesla')
-       } else {
-         setCurrentTheme('default')
-       }
+     if (colorTheme === 'auto') {
+       if (filterVehicle === 'rivian') setCurrentColorTheme('rivian')
+       else if (filterVehicle === 'tesla') setCurrentColorTheme('tesla')
+       else setCurrentColorTheme('default')
      } else {
-       setCurrentTheme(selectedTheme)
+       setCurrentColorTheme(colorTheme)
      }
-   }, [filterVehicle, selectedTheme])
+   }, [filterVehicle, colorTheme])
 
-   // Apply theme to document
+   // Compute dark mode based on preference and system
    useEffect(() => {
-     if (currentTheme === 'default') {
-       document.documentElement.removeAttribute('data-theme')
+     if (darkMode === 'auto') {
+       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+       setIsDark(prefersDark)
      } else {
-       document.documentElement.setAttribute('data-theme', currentTheme)
+       setIsDark(darkMode === 'dark')
      }
-   }, [currentTheme])
+   }, [darkMode])
+
+   // Apply theme attributes to document
+   useEffect(() => {
+     const root = document.documentElement
+     if (currentColorTheme === 'default') {
+       root.removeAttribute('data-theme')
+     } else {
+       root.setAttribute('data-theme', currentColorTheme)
+     }
+     if (isDark) {
+       root.setAttribute('data-dark', '')
+     } else {
+       root.removeAttribute('data-dark')
+     }
+   }, [currentColorTheme, isDark])
 
   const handleRescan = async () => {
     setScanning(true)
@@ -173,18 +187,25 @@ export default function App() {
 
   return (
     <div className="app">
-       <header className="header">
+        <header className="header">
         <div className="header-left">
           <span className="logo">🚗</span>
           <h1 className="title">DriveCam Viewer</h1>
           {health && <span className={`status-dot ${health.status}`} title={`${clipCount} clips cached`} />}
         </div>
         <div className="header-right">
+          <button
+            className="btn btn-icon"
+            onClick={() => setDarkMode(darkMode === 'dark' ? 'light' : 'dark')}
+            title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          >
+            {isDark ? '☀️' : '🌙'}
+          </button>
           <select
-            value={selectedTheme}
-            onChange={(e) => setSelectedTheme(e.target.value)}
+            value={colorTheme}
+            onChange={(e) => setColorTheme(e.target.value)}
             className="theme-select"
-            title="Theme"
+            title="Color Theme"
           >
             <option value="auto">Auto</option>
             <option value="rivian">Rivian</option>
