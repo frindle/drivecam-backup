@@ -53,9 +53,6 @@ RUN pip install --no-cache-dir --break-system-packages \
 RUN pip install --no-cache-dir --break-system-packages \
     aioftp>=0.22.0
 
-RUN pip install --no-cache-dir --break-system-packages \
-    python-nfs>=0.2.0
-
 ENV DATA_PATH=/data
 ENV SHARE_PATH=/data
 ENV STATIC_PATH=/app/backend/static
