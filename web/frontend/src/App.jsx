@@ -125,11 +125,93 @@ async function getFilesFromDir(dirHandle) {
 
 function ImportPanel({ onClose, onImported }) {
   const fileInputRef = useRef(null)
+  const dropZoneRef = useRef(null)
+  const [isDragging, setIsDragging] = useState(false)
   const [files, setFiles] = useState([])
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+
+  const scanDirHandle = async (dirHandle) => {
+    const found = []
+    async function walk(dir, path = '') {
+      for await (const entry of dir.values()) {
+        const entryPath = path ? `${path}/${entry.name}` : entry.name
+        if (entry.kind === 'directory') {
+          try {
+            const subDir = await dir.getDirectoryHandle(entry.name)
+            await walk(subDir, entryPath)
+          } catch {}
+        } else if (entry.kind === 'file') {
+          const ext = entry.name.split('.').pop().toLowerCase()
+          if (['mp4', 'mov', 'ts', 'avi', 'mkv'].includes(ext)) {
+            found.push({ path: entryPath, handle: entry })
+          }
+        }
+      }
+    }
+    await walk(dirHandle)
+    return found
+  }
+
+  const scanDropEntry = (entry, path = '') => {
+    return new Promise((resolve) => {
+      if (entry.isFile) {
+        entry.file((file) => {
+          const ext = file.name.split('.').pop().toLowerCase()
+          if (['mp4', 'mov', 'ts', 'avi', 'mkv'].includes(ext)) {
+            resolve([{ path: path ? `${path}/${file.name}` : file.name, file }])
+          } else {
+            resolve([])
+          }
+        })
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader()
+        const allFiles = []
+        const readDir = () => {
+          reader.readEntries(async (entries) => {
+            if (entries.length === 0) {
+              resolve(allFiles)
+            } else {
+              for (const e of entries) {
+                const childFiles = await scanDropEntry(e, path ? `${path}/${entry.name}` : entry.name)
+                allFiles.push(...childFiles)
+              }
+              readDir()
+            }
+          })
+        }
+        readDir()
+      } else {
+        resolve([])
+      }
+    })
+  }
+
+const handleDrop = async (e) => {
+    e.preventDefault()
+    setIsDragging(false)
+    try {
+      setMessage('Scanning for video files…')
+      setError('')
+      const items = Array.from(e.dataTransfer.items)
+      let found = []
+      for (const item of items) {
+        if (item.kind === 'file') {
+          const entry = item.webkitGetAsEntry()
+          if (entry) {
+            const files = await scanDropEntry(entry)
+            found = found.concat(files)
+          }
+        }
+      }
+      setFiles(found)
+      setMessage(`${found.length} video file(s) found`)
+    } catch (e) {
+      setError('Failed to read dropped folder: ' + e.message)
+    }
+  }
 
   const selectDir = async () => {
     try {
@@ -137,7 +219,7 @@ function ImportPanel({ onClose, onImported }) {
       setError('')
       if (typeof window.showDirectoryPicker !== 'undefined') {
         const handle = await window.showDirectoryPicker({ mode: 'read' })
-        const found = await getFilesFromDir(handle)
+        const found = await scanDirHandle(handle)
         setFiles(found)
         setMessage(`${found.length} video file(s) found`)
       } else {
@@ -220,7 +302,17 @@ function ImportPanel({ onClose, onImported }) {
             Subfolders like RecentClips, SavedClips, dashcam are auto-detected.
           </p>
 
-          <div className="import-buttons">
+          <div
+            className={`import-dropzone ${isDragging ? 'dragging' : ''}`}
+            style={{ textAlign: 'center' }}
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+          >
+            <div className="drop-icon">📂</div>
+            <div className="drop-title">Drop your SD Card folder here</div>
+            <div className="drop-hint">Open Finder, navigate to the SD card root, then drag that folder onto this window</div>
+            <div className="drop-or">— or —</div>
             <button
               className="btn btn-primary"
               onClick={selectDir}
