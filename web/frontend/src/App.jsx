@@ -66,8 +66,16 @@ function byteCountFmt(bytes) {
   return `${bytes.toFixed(1)} PB`
 }
 
-function StorageCalculator({ stats }) {
-  if (!stats || !stats.total_clips) return null
+function StorageCalculator({ stats, onImportClick }) {
+  if (!stats) return null
+  if (!stats.total_clips) {
+    return (
+      <div className="storage-calculator">
+        <span className="storage-label">No footage yet.</span>
+        <button className="btn btn-sm" onClick={onImportClick}>📥 Import SD Card</button>
+      </div>
+    )
+  }
   const { clips_per_hour, total_size_bytes, total_clips } = stats
   if (!clips_per_hour || clips_per_hour === 0) return null
 
@@ -116,19 +124,18 @@ async function getFilesFromDir(dirHandle) {
 }
 
 function ImportPanel({ onClose, onImported }) {
-  const [dirHandle, setDirHandle] = useState(null)
+  const fileInputRef = useRef(null)
   const [files, setFiles] = useState([])
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
-  const selectDir = async () => {
+  const selectDirChrome = async () => {
     try {
-      const handle = await window.showDirectoryPicker({ mode: 'read' })
-      setDirHandle(handle)
       setMessage('Scanning for video files…')
       setError('')
+      const handle = await window.showDirectoryPicker({ mode: 'read' })
       const found = await getFilesFromDir(handle)
       setFiles(found)
       setMessage(`${found.length} video file(s) found`)
@@ -137,23 +144,35 @@ function ImportPanel({ onClose, onImported }) {
     }
   }
 
+  const handleFirefoxFiles = (e) => {
+    const entries = Array.from(e.target.files)
+    const videoFiles = []
+    for (const file of entries) {
+      const ext = file.name.split('.').pop().toLowerCase()
+      if (['mp4', 'mov', 'ts', 'avi', 'mkv'].includes(ext)) {
+        const relPath = file.webkitRelativePath || file.name
+        videoFiles.push({ path: relPath, file })
+      }
+    }
+    setFiles(videoFiles)
+    setMessage(`${videoFiles.length} video file(s) found`)
+    e.target.value = ''
+  }
+
   const handleUpload = async () => {
     if (!files.length) return
     setUploading(true)
     setProgress(0)
     setError('')
 
-    const paths = files.map(f => f.path)
-    const total = files.length
     let saved = 0
     const errors = []
 
     for (let i = 0; i < files.length; i++) {
-      const { path, handle } = files[i]
+      const { path, file: fileObj } = files[i]
       const safePath = path.replace(/^\//, '')
       const formData = new FormData()
       formData.append('paths', JSON.stringify([safePath]))
-      const fileObj = await handle.getFile()
       formData.append('files', fileObj, fileObj.name)
 
       try {
@@ -166,11 +185,11 @@ function ImportPanel({ onClose, onImported }) {
       } catch (e) {
         errors.push(`${path}: ${e.message}`)
       }
-      setProgress(Math.round(((i + 1) / total) * 100))
+      setProgress(Math.round(((i + 1) / files.length) * 100))
     }
 
     setUploading(false)
-    setMessage(`Imported ${saved}/${total} file(s)`)
+    setMessage(`Imported ${saved}/${files.length} file(s)`)
     if (errors.length) setError(errors.slice(0, 5).join('\n'))
     if (saved > 0) onImported()
   }
@@ -197,9 +216,33 @@ function ImportPanel({ onClose, onImported }) {
             Subfolders like RecentClips, SavedClips, dashcam are auto-detected.
           </p>
 
-          <button className="btn btn-primary" onClick={selectDir} disabled={uploading}>
-            📂 Select SD Card Folder
-          </button>
+          <div className="import-buttons">
+            <button
+              className="btn btn-primary"
+              onClick={selectDirChrome}
+              disabled={uploading}
+              title="Chrome/Edge: Select folder directly"
+            >
+              📂 Select SD Card Folder
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              title="Firefox/Safari: Select folder to import from"
+            >
+              📁 Choose Folder
+            </button>
+          </div>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            webkitdirectory="webkitdirectory"
+            multiple
+            onChange={handleFirefoxFiles}
+            style={{ display: 'none' }}
+          />
 
           {message && <div className="import-message">{message}</div>}
           {error && <div className="import-error">{error}</div>}
