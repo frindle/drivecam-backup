@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -45,6 +46,20 @@ def _get_conn():
             password    TEXT,
             path        TEXT NOT NULL,
             enabled     INTEGER DEFAULT 1,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cloud_providers (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            provider    TEXT NOT NULL,
+            credentials TEXT NOT NULL,
+            folder_path TEXT NOT NULL,
+            enabled     INTEGER DEFAULT 1,
+            clip_count  INTEGER DEFAULT 0,
+            last_sync   TEXT,
             created_at  TEXT NOT NULL,
             updated_at  TEXT NOT NULL
         )
@@ -369,5 +384,115 @@ def test_remote_share(share_id: int) -> dict:
             return result
         else:
             return {"success": False, "message": f"Unsupported protocol: {share['protocol']}"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+# ─── Cloud Providers ──────────────────────────────────────────
+
+def get_all_cloud_providers() -> List[dict]:
+    with _get_conn() as conn:
+        rows = conn.execute("""
+            SELECT id, name, provider, credentials, folder_path, enabled, clip_count, last_sync, created_at, updated_at
+            FROM cloud_providers ORDER BY created_at DESC
+        """).fetchall()
+        providers = []
+        for row in rows:
+            providers.append({
+                "id": row[0],
+                "name": row[1],
+                "provider": row[2],
+                "credentials": json.loads(row[3]) if row[3] else {},
+                "folder_path": row[4],
+                "enabled": bool(row[5]),
+                "clip_count": row[6],
+                "last_sync": row[7],
+                "created_at": row[8],
+                "updated_at": row[9],
+            })
+        return providers
+
+
+def get_cloud_provider(provider_id: int) -> Optional[dict]:
+    providers = get_all_cloud_providers()
+    for p in providers:
+        if p["id"] == provider_id:
+            return p
+    return None
+
+
+def create_cloud_provider(
+    name: str,
+    provider: str,
+    credentials: dict,
+    folder_path: str,
+) -> int:
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO cloud_providers (name, provider, credentials, folder_path, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?)
+            """,
+            (name, provider, json.dumps(credentials), folder_path, now, now),
+        )
+        return cur.lastrowid
+
+
+def update_cloud_provider(
+    provider_id: int,
+    name: Optional[str] = None,
+    folder_path: Optional[str] = None,
+    enabled: Optional[bool] = None,
+    credentials: Optional[dict] = None,
+    clip_count: Optional[int] = None,
+    last_sync: Optional[str] = None,
+) -> bool:
+    now = datetime.utcnow().isoformat()
+    fields = []
+    values = []
+    if name is not None:
+        fields.append("name = ?")
+        values.append(name)
+    if folder_path is not None:
+        fields.append("folder_path = ?")
+        values.append(folder_path)
+    if enabled is not None:
+        fields.append("enabled = ?")
+        values.append(1 if enabled else 0)
+    if credentials is not None:
+        fields.append("credentials = ?")
+        values.append(json.dumps(credentials))
+    if clip_count is not None:
+        fields.append("clip_count = ?")
+        values.append(clip_count)
+    if last_sync is not None:
+        fields.append("last_sync = ?")
+        values.append(last_sync)
+    if fields:
+        fields.append("updated_at = ?")
+        values.append(now)
+        sql = f"UPDATE cloud_providers SET {', '.join(fields)} WHERE id = ?"
+        values.append(provider_id)
+        with _get_conn() as conn:
+            conn.execute(sql, values)
+        return True
+    return False
+
+
+def delete_cloud_provider(provider_id: int) -> bool:
+    with _get_conn() as conn:
+        cur = conn.execute("DELETE FROM cloud_providers WHERE id = ?", (provider_id,))
+        return cur.rowcount > 0
+
+
+def test_cloud_provider(provider_id: int) -> dict:
+    from .services import get_cloud_client
+    provider = get_cloud_provider(provider_id)
+    if not provider:
+        return {"success": False, "message": "Provider not found"}
+    try:
+        client = get_cloud_client(provider["provider"], provider["credentials"], provider["folder_path"])
+        return client.test_connection()
     except Exception as e:
         return {"success": False, "message": str(e)}

@@ -137,3 +137,60 @@ class RemoteShareTestResponse(BaseModel):
     success: bool
     message: str
     details: Optional[dict] = None
+
+
+class CloudProviderType(str, Enum):
+    ICLOUD = "icloud"
+    GDRIVE = "gdrive"
+    ONEDRIVE = "onedrive"
+    DROPBOX = "dropbox"
+
+
+class CloudProviderBase(BaseModel):
+    name: str
+    provider: CloudProviderType
+    folder_path: str = Field(description="Cloud folder path to scan (e.g., /Drivecam or /Media)")
+    enabled: bool = True
+
+
+class CloudProviderCreate(BaseModel):
+    name: str
+    provider: CloudProviderType
+    folder_path: str
+    credentials: dict = Field(default_factory=dict, description="OAuth tokens or auth data as JSON")
+
+
+class CloudProviderUpdate(BaseModel):
+    name: Optional[str] = None
+    folder_path: Optional[str] = None
+    enabled: Optional[bool] = None
+    credentials: Optional[dict] = None
+
+
+class CloudProviderResponse(CloudProviderBase):
+    id: int
+    connected: bool = False
+    clip_count: int = 0
+    last_sync: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CloudProviderTestResponse(BaseModel):
+    success: bool
+    message: str
+    details: Optional[dict] = None
+
+
+class CloudOAuthUrlResponse(BaseModel):
+    auth_url: str
+    state: str
+
+
+class CloudSyncResponse(BaseModel):
+    provider_id: int
+    clips_found: int
+    status: str

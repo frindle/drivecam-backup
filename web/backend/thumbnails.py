@@ -1,132 +1,127 @@
 import hashlib
+import logging
 import os
 import subprocess
-from typing import Optional
+from pathlib import Path
 
-THUMBNAIL_SIZE = "320x180"
-THUMBNAIL_TIME = "00:00:01"
+logger = logging.getLogger(__name__)
+
 CACHE_DIR = "/tmp/drivecam_thumbnails"
 
+_ffmpeg_path: str | None = None
 _ffmpeg_checked = False
-_ffmpeg_works = False
-_cuda_checked = False
-_cuda_available = False
-_nvidia_smi_checked = False
-_nvidia_smi_available = False
 
 
-def _get_cache_path(clip_relative_path: str) -> str:
-    h = hashlib.md5(clip_relative_path.encode()).hexdigest()
-    return os.path.join(CACHE_DIR, f"{h}.jpg")
-
-
-def _check_cuda() -> bool:
-    global _cuda_checked, _cuda_available
-    if _cuda_checked:
-        return _cuda_available
-    _cuda_checked = True
-    try:
-        result = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-hwaccels"],
-            capture_output=True, text=True, timeout=5
-        )
-        _cuda_available = "cuda" in result.stdout.lower()
-    except:
-        _cuda_available = False
-    return _cuda_available
-
-
-def _check_nvidia_smi() -> bool:
-    global _nvidia_smi_checked, _nvidia_smi_available
-    if _nvidia_smi_checked:
-        return _nvidia_smi_available
-    _nvidia_smi_checked = True
-    try:
-        subprocess.run(["nvidia-smi"], capture_output=True, timeout=5)
-        _nvidia_smi_available = True
-    except:
-        _nvidia_smi_available = False
-    return _nvidia_smi_available
+def _check_ffmpeg() -> str:
+    global _ffmpeg_path, _ffmpeg_checked
+    if _ffmpeg_checked:
+        return _ffmpeg_path or ""
+    _ffmpeg_checked = True
+    for candidate in ["/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg", "ffmpeg"]:
+        try:
+            subprocess.run([candidate, "-version"], capture_output=True, timeout=5)
+            _ffmpeg_path = candidate
+            return _ffmpeg_path
+        except OSError:
+            continue
+    return ""
 
 
 def ffmpeg_available() -> bool:
-    global _ffmpeg_checked, _ffmpeg_works
-    if _ffmpeg_checked:
-        return _ffmpeg_works
-    _ffmpeg_checked = True
+    return bool(_check_ffmpeg())
+
+
+def _check_cuda() -> bool:
+    ffmpeg = _check_ffmpeg()
+    if not ffmpeg:
+        return False
     try:
-        subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5)
-        _ffmpeg_works = True
-    except (subprocess.SubprocessError, FileNotFoundError):
-        _ffmpeg_works = False
-    return _ffmpeg_works
+        result = subprocess.run(
+            [ffmpeg, "-hwaccels"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return "cuda" in result.stdout.lower()
+    except Exception:
+        return False
 
 
-def get_duration(file_path: str) -> Optional[float]:
-    for hwaccel in (["-hwaccel", "cuda"] if _check_cuda() and _check_nvidia_smi() else [], []):
-        try:
-            cmd = [
-                "ffprobe", "-v", "error",
-                *hwaccel,
+def _check_nvidia_smi() -> bool:
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
+    except OSError:
+        return False
+
+
+def _use_cuda() -> bool:
+    try:
+        return _check_cuda() and _check_nvidia_smi()
+    except Exception:
+        return False
+
+
+def _get_cache_path(relative_path: str, source: str = "local", share_id: int | None = None) -> str:
+    key = f"{source}:{share_id or ''}:{relative_path}"
+    h = hashlib.md5(key.encode()).hexdigest()
+    return os.path.join(CACHE_DIR, f"{h}.jpg")
+
+
+def get_duration(file_path: str) -> float | None:
+    ffmpeg = _check_ffmpeg()
+    if not ffmpeg:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg, "-v", "error",
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
-                file_path
-            ]
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
+                file_path,
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0 and result.stdout.strip():
             return float(result.stdout.strip())
-        except (subprocess.SubprocessError, ValueError):
-            pass
+    except (subprocess.SubprocessError, ValueError):
+        pass
     return None
 
 
-def generate_thumbnail(file_path: str, clip_relative_path: str, share_path: str) -> Optional[str]:
-    cache_path = _get_cache_path(clip_relative_path)
-    if os.path.exists(cache_path):
-        return f"/thumbnails/{os.path.basename(cache_path)}"
-
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    if not os.path.exists(file_path):
+def generate_thumbnail(
+    file_path: str,
+    clip_relative_path: str,
+    source: str = "local",
+    share_id: int | None = None,
+) -> str | None:
+    ffmpeg = _check_ffmpeg()
+    if not ffmpeg:
         return None
 
-    use_cuda = _check_cuda() and _check_nvidia_smi()
+    cache_path = _get_cache_path(clip_relative_path, source, share_id)
+    if os.path.exists(cache_path):
+        return cache_path
 
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+    hwaccel = ["-hwaccel", "cuda"] if _use_cuda() else []
     try:
-        if use_cuda:
-            subprocess.run(
-                [
-                    "ffmpeg", "-y",
-                    "-hwaccel", "cuda",
-                    "-i", file_path,
-                    "-ss", THUMBNAIL_TIME,
-                    "-vframes", "1",
-                    "-vf", f"scale_cuda={THUMBNAIL_SIZE}:force_original_aspect_ratio=decrease",
-                    "-q:v", "3",
-                    cache_path,
-                ],
-                capture_output=True,
-                timeout=30,
-            )
-        else:
-            subprocess.run(
-                [
-                    "ffmpeg", "-y",
-                    "-i", file_path,
-                    "-ss", THUMBNAIL_TIME,
-                    "-vframes", "1",
-                    "-vf", f"scale={THUMBNAIL_SIZE}:force_original_aspect_ratio=decrease,pad={THUMBNAIL_SIZE}:(ow-iw)/2:(oh-ih)/2:black",
-                    "-q:v", "3",
-                    cache_path,
-                ],
-                capture_output=True,
-                timeout=30,
-            )
-        if os.path.exists(cache_path):
-            return f"/thumbnails/{os.path.basename(cache_path)}"
+        result = subprocess.run(
+            [
+                ffmpeg, "-y",
+                "-skip_frame", "nokey",
+                *hwaccel,
+                "-i", file_path,
+                "-frames:v", "1",
+                "-q:v", "2",
+                cache_path,
+            ],
+            capture_output=True, timeout=60,
+        )
+        if result.returncode == 0 and os.path.exists(cache_path):
+            return cache_path
     except subprocess.SubprocessError:
         pass
 

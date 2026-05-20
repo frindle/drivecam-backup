@@ -89,3 +89,54 @@ export async function getScanStatus() {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }
+
+export async function getClipDuration(path) {
+  const encoded = encodeURIComponent(path);
+  return apiFetch(`/clips/${encoded}/duration`);
+}
+
+export async function getCloudProviders() {
+  return apiFetch('/cloud/providers');
+}
+
+export async function createCloudProvider(provider) {
+  const res = await fetch(`${BASE}/cloud/providers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(provider),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateCloudProvider(providerId, provider) {
+  const res = await fetch(`${BASE}/cloud/providers/${providerId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(provider),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export async function deleteCloudProvider(providerId) {
+  const res = await fetch(`${BASE}/cloud/providers/${providerId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export async function testCloudProvider(providerId) {
+  const res = await fetch(`${BASE}/cloud/providers/${providerId}/test`, { method: 'POST' });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export async function syncCloudProvider(providerId) {
+  const res = await fetch(`${BASE}/cloud/providers/${providerId}/sync`, { method: 'POST' });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export async function getCloudOAuthUrl(provider) {
+  return apiFetch(`/cloud/oauth/${provider}/url`);
+}

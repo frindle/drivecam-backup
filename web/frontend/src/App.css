@@ -917,7 +917,43 @@ body {
   border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
-/* ─── Share Form ─────────────────────────────────────────── */
+/* ─── Settings Tabs ─────────────────────────────────────── */
+
+.settings-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  gap: 4px;
+  background: var(--surface);
+}
+
+.settings-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.settings-tab:hover { color: var(--text); }
+
+.settings-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ─── Protocol Badges ──────────────────────────────────── */
+
+.protocol-badge.icloud { background: #007aff; }
+.protocol-badge.gdrive { background: #4285f4; }
+.protocol-badge.onedrive { background: #0078d4; }
+.protocol-badge.dropbox { background: #0061ff; }
+.protocol-badge.cloud { background: #8b5cf6; }
 
 .share-form {
   background: var(--surface2);

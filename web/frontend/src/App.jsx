@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus } from './api'
+import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl } from './api'
 
 const EVENT_COLORS = {
   driving: '#3b82f6',
@@ -547,6 +547,7 @@ function SharesPanel({ onClose, onSaved }) {
   const [testResult, setTestResult] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [activeTab, setActiveTab] = useState('shares')
 
   const loadShares = useCallback(async () => {
     setLoading(true)
@@ -657,122 +658,404 @@ function SharesPanel({ onClose, onSaved }) {
         <div className="modal-header">
           <div className="modal-title">
             <span>📁</span>
-            <span>Remote Shares</span>
+            <span>Settings</span>
           </div>
           <div className="modal-nav">
             <button className="btn btn-nav btn-close" onClick={onClose}>✕</button>
           </div>
         </div>
 
-        <div className="shares-body">
-          {error && <div className="shares-error">{error} <button onClick={() => setError('')}>✕</button></div>}
+        <div className="settings-tabs">
+          <button className={`settings-tab ${activeTab === 'shares' ? 'active' : ''}`} onClick={() => setActiveTab('shares')}>Shares</button>
+          <button className={`settings-tab ${activeTab === 'cloud' ? 'active' : ''}`} onClick={() => setActiveTab('cloud')}>Cloud</button>
+        </div>
 
-          {!showForm && (
-            <div className="shares-toolbar">
-              <button className="btn btn-primary" onClick={() => { setShowForm(true); setEditingShare(null); setForm({ name: '', protocol: 'smb', host: '', port: '', path: '', username: '', password: '', enabled: true }) }}>
-                + Add Share
-              </button>
+        {activeTab === 'shares' && (
+          <SharesTab
+            shares={shares} loading={loading} showForm={showForm} editingShare={editingShare} form={form}
+            testing={testing} testResult={testResult} saving={saving} error={error}
+            onEdit={handleEdit} onDelete={handleDelete} onToggle={handleToggle} onTest={handleTest}
+            onSubmit={handleSubmit} onReset={resetForm} onShowForm={setShowForm} onFormChange={setForm}
+          />
+        )}
+
+        {activeTab === 'cloud' && (
+          <CloudPanel onClose={onClose} onSaved={onSaved} />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SharesTab({ shares, loading, showForm, editingShare, form, testing, testResult, saving, error, onEdit, onDelete, onToggle, onTest, onSubmit, onReset, onShowForm, onFormChange }) {
+  return (
+    <div className="shares-body">
+      {error && <div className="shares-error">{error} <button onClick={() => {}}>✕</button></div>}
+
+      {!showForm && (
+        <div className="shares-toolbar">
+          <button className="btn btn-primary" onClick={() => { onShowForm(true); onFormChange({ name: '', protocol: 'smb', host: '', port: '', path: '', username: '', password: '', enabled: true }) }}>
+            + Add Share
+          </button>
+        </div>
+      )}
+
+      {showForm && (
+        <form className="share-form" onSubmit={onSubmit}>
+          <h3>{editingShare ? 'Edit Share' : 'New Share'}</h3>
+          <div className="form-row">
+            <label>
+              Name
+              <input type="text" value={form.name} onChange={e => onFormChange(f => ({ ...f, name: e.target.value }))} placeholder="My NAS" required />
+            </label>
+            <label>
+              Protocol
+              <select value={form.protocol} onChange={e => onFormChange(f => ({ ...f, protocol: e.target.value }))}>
+                <option value="smb">SMB</option>
+                <option value="ftp">FTP</option>
+                <option value="nfs">NFS</option>
+              </select>
+            </label>
+          </div>
+          <div className="form-row">
+            <label>
+              Host
+              <input type="text" value={form.host} onChange={e => onFormChange(f => ({ ...f, host: e.target.value }))} placeholder="192.168.1.100" required />
+            </label>
+            <label>
+              Port
+              <input type="number" value={form.port} onChange={e => onFormChange(f => ({ ...f, port: e.target.value }))} placeholder={form.protocol === 'smb' ? '445' : form.protocol === 'ftp' ? '21' : '2049'} />
+            </label>
+          </div>
+          <label className="form-full">
+            Path
+            <input type="text" value={form.path} onChange={e => onFormChange(f => ({ ...f, path: e.target.value }))} placeholder="/dashcam or /TeslaCam" required />
+          </label>
+          <div className="form-row">
+            <label>
+              Username
+              <input type="text" value={form.username} onChange={e => onFormChange(f => ({ ...f, username: e.target.value }))} placeholder="guest" />
+            </label>
+            <label>
+              Password
+              <input type="password" value={form.password} onChange={e => onFormChange(f => ({ ...f, password: e.target.value }))} placeholder="••••••" />
+            </label>
+          </div>
+          <label className="form-check">
+            <input type="checkbox" checked={form.enabled} onChange={e => onFormChange(f => ({ ...f, enabled: e.target.checked }))} />
+            Enabled
+          </label>
+          <div className="form-actions">
+            <button type="button" className="btn btn-clear" onClick={onReset}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+          </div>
+        </form>
+      )}
+
+      {loading ? (
+        <div className="shares-loading">Loading shares…</div>
+      ) : (
+        <div className="shares-list">
+          {shares.length === 0 && !showForm && (
+            <div className="shares-empty">No shares configured. Add one to scan remote footage.</div>
+          )}
+          {shares.map(share => (
+            <div key={share.id} className={`share-item ${!share.enabled ? 'disabled' : ''}`}>
+              <div className="share-info">
+                <div className="share-name">
+                  <span className={`protocol-badge ${share.protocol}`}>{PROTOCOL_LABELS[share.protocol] || share.protocol}</span>
+                  {share.name}
+                </div>
+                <div className="share-host">{share.host}:{share.port || (share.protocol === 'smb' ? 445 : share.protocol === 'ftp' ? 21 : 2049)}{share.path}</div>
+              </div>
+              <div className="share-actions">
+                <button
+                  className={`btn btn-toggle ${share.enabled ? 'on' : ''}`}
+                  onClick={() => onToggle(share)}
+                  title={share.enabled ? 'Disable' : 'Enable'}
+                >
+                  {share.enabled ? '●' : '○'}
+                </button>
+                <button
+                  className="btn btn-share-action"
+                  onClick={() => onTest(share.id)}
+                  disabled={testing === share.id}
+                  title="Test connection"
+                >
+                  {testing === share.id ? '⏳' : '🔗'}
+                </button>
+                <button className="btn btn-share-action" onClick={() => onEdit(share)} title="Edit">✏️</button>
+                <button className="btn btn-share-action btn-danger" onClick={() => onDelete(share.id)} title="Delete">🗑️</button>
+              </div>
+              {testResult && testResult.id === share.id && (
+                <div className={`test-result ${testResult.success ? 'success' : 'fail'}`}>
+                  {testResult.success ? '✅' : '❌'} {testResult.message}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const CLOUD_PROVIDERS = [
+  { value: 'icloud', label: 'iCloud', icon: '☁️' },
+  { value: 'gdrive', label: 'Google Drive', icon: '📹' },
+  { value: 'onedrive', label: 'OneDrive', icon: '☁️' },
+  { value: 'dropbox', label: 'Dropbox', icon: '📦' },
+]
+
+function CloudPanel({ onClose, onSaved }) {
+  const [providers, setProviders] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+  const [form, setForm] = useState({ name: '', provider: 'icloud', folder_path: '/Drivecam', credentials: {} })
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(null)
+  const [syncing, setSyncing] = useState(null)
+  const [testResults, setTestResults] = useState({})
+  const [syncResults, setSyncResults] = useState({})
+
+  const loadProviders = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await getCloudProviders()
+      setProviders(Array.isArray(data) ? data : [])
+    } catch (e) {
+      console.error('Failed to load cloud providers:', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadProviders() }, [loadProviders])
+
+  const resetForm = () => {
+    setForm({ name: '', provider: 'icloud', folder_path: '/Drivecam', credentials: {} })
+    setEditingId(null)
+    setShowForm(false)
+    setError('')
+  }
+
+  const handleEdit = (p) => {
+    setEditingId(p.id)
+    setForm({ name: p.name, provider: p.provider, folder_path: p.folder_path, credentials: p.credentials || {} })
+    setShowForm(true)
+    setError('')
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      const payload = { name: form.name, provider: form.provider, folder_path: form.folder_path, credentials: form.credentials }
+      if (editingId) {
+        await updateCloudProvider(editingId, payload)
+      } else {
+        await createCloudProvider(payload)
+      }
+      resetForm()
+      loadProviders()
+      onSaved()
+    } catch (err) {
+      setError(err.message || 'Failed to save provider')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (id) => {
+    if (!confirm('Delete this cloud provider?')) return
+    try {
+      await deleteCloudProvider(id)
+      loadProviders()
+    } catch (err) {
+      setError(err.message || 'Failed to delete provider')
+    }
+  }
+
+  const handleTest = async (id) => {
+    setTesting(id)
+    setTestResults(r => { const n = {...r}; delete n[id]; return n })
+    try {
+      const result = await testCloudProvider(id)
+      setTestResults(r => ({ ...r, [id]: result }))
+    } catch (err) {
+      setTestResults(r => ({ ...r, [id]: { success: false, message: err.message } }))
+    } finally {
+      setTesting(null)
+    }
+  }
+
+  const handleSync = async (id) => {
+    setSyncing(id)
+    try {
+      const result = await syncCloudProvider(id)
+      setSyncResults(r => ({ ...r, [id]: result }))
+      loadProviders()
+      onSaved()
+    } catch (err) {
+      setSyncResults(r => ({ ...r, [id]: { status: 'error', message: err.message } }))
+    } finally {
+      setSyncing(null)
+    }
+  }
+
+  return (
+    <div className="shares-body">
+      {error && <div className="shares-error">{error} <button onClick={() => setError('')}>✕</button></div>}
+
+      {!showForm && (
+        <div className="shares-toolbar">
+          <button className="btn btn-primary" onClick={() => { setShowForm(true); setEditingId(null); setForm({ name: '', provider: 'icloud', folder_path: '/Drivecam', credentials: {} }) }}>
+            + Add Cloud Provider
+          </button>
+        </div>
+      )}
+
+      {showForm && (
+        <form className="share-form cloud-form" onSubmit={handleSubmit}>
+          <h3>{editingId ? 'Edit Provider' : 'New Cloud Provider'}</h3>
+          <div className="form-row">
+            <label>
+              Name
+              <input type="text" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="My iCloud Drive" required />
+            </label>
+            <label>
+              Provider
+              <select value={form.provider} onChange={e => setForm(f => ({ ...f, provider: e.target.value, credentials: {} }))}>
+                {CLOUD_PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.icon} {p.label}</option>)}
+              </select>
+            </label>
+          </div>
+          <label className="form-full">
+            Folder Path
+            <input type="text" value={form.folder_path} onChange={e => setForm(f => ({ ...f, folder_path: e.target.value }))} placeholder="/Drivecam or /Media" required />
+          </label>
+
+          {form.provider === 'icloud' && (
+            <div className="form-row">
+              <label>
+                Apple ID
+                <input type="email" value={form.credentials.username || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials, username: e.target.value } }))} placeholder="me@icloud.com" />
+              </label>
+              <label>
+                Password
+                <input type="password" value={form.credentials.password || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials, password: e.target.value } }))} placeholder="••••••" />
+              </label>
             </div>
           )}
 
-          {showForm && (
-            <form className="share-form" onSubmit={handleSubmit}>
-              <h3>{editingShare ? 'Edit Share' : 'New Share'}</h3>
+          {form.provider === 'gdrive' && (
+            <div className="form-row">
+              <label>
+                Client ID
+                <input type="text" value={form.credentials.client_id || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials, client_id: e.target.value } }))} placeholder="apps.googleusercontent.com" />
+              </label>
+              <label>
+                Client Secret
+                <input type="password" value={form.credentials.client_secret || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials, client_secret: e.target.value } }))} placeholder="••••••" />
+              </label>
+            </div>
+          )}
+
+          {form.provider === 'onedrive' && (
+            <>
               <div className="form-row">
                 <label>
-                  Name
-                  <input type="text" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="My NAS" required />
+                  Client ID
+                  <input type="text" value={form.credentials.client_id || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials, client_id: e.target.value } }))} placeholder="Application ID" />
                 </label>
                 <label>
-                  Protocol
-                  <select value={form.protocol} onChange={e => setForm(f => ({ ...f, protocol: e.target.value }))}>
-                    <option value="smb">SMB</option>
-                    <option value="ftp">FTP</option>
-                    <option value="nfs">NFS</option>
-                  </select>
+                  Client Secret
+                  <input type="password" value={form.credentials.client_secret || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials, client_secret: e.target.value } }))} placeholder="••••••" />
                 </label>
               </div>
               <div className="form-row">
                 <label>
-                  Host
-                  <input type="text" value={form.host} onChange={e => setForm(f => ({ ...f, host: e.target.value }))} placeholder="192.168.1.100" required />
+                  Tenant ID
+                  <input type="text" value={form.credentials.tenant_id || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials, tenant_id: e.target.value } }))} placeholder="common" />
                 </label>
                 <label>
-                  Port
-                  <input type="number" value={form.port} onChange={e => setForm(f => ({ ...f, port: e.target.value }))} placeholder={form.protocol === 'smb' ? '445' : form.protocol === 'ftp' ? '21' : '2049'} />
+                  Access Token
+                  <input type="password" value={form.credentials.access_token || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials, access_token: e.target.value } }))} placeholder="••••••" />
                 </label>
               </div>
               <label className="form-full">
-                Path
-                <input type="text" value={form.path} onChange={e => setForm(f => ({ ...f, path: e.target.value }))} placeholder="/dashcam or /TeslaCam" required />
+                Refresh Token
+                <input type="password" value={form.credentials.refresh_token || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials, refresh_token: e.target.value } }))} placeholder="••••••" />
               </label>
-              <div className="form-row">
-                <label>
-                  Username
-                  <input type="text" value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} placeholder="guest" />
-                </label>
-                <label>
-                  Password
-                  <input type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="••••••" />
-                </label>
-              </div>
-              <label className="form-check">
-                <input type="checkbox" checked={form.enabled} onChange={e => setForm(f => ({ ...f, enabled: e.target.checked }))} />
-                Enabled
-              </label>
-              <div className="form-actions">
-                <button type="button" className="btn btn-clear" onClick={resetForm}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
-              </div>
-            </form>
+            </>
           )}
 
-          {loading ? (
-            <div className="shares-loading">Loading shares…</div>
-          ) : (
-            <div className="shares-list">
-              {shares.length === 0 && !showForm && (
-                <div className="shares-empty">No shares configured. Add one to scan remote footage.</div>
-              )}
-              {shares.map(share => (
-                <div key={share.id} className={`share-item ${!share.enabled ? 'disabled' : ''}`}>
-                  <div className="share-info">
-                    <div className="share-name">
-                      <span className={`protocol-badge ${share.protocol}`}>{PROTOCOL_LABELS[share.protocol] || share.protocol}</span>
-                      {share.name}
-                    </div>
-                    <div className="share-host">{share.host}:{share.port || (share.protocol === 'smb' ? 445 : share.protocol === 'ftp' ? 21 : 2049)}{share.path}</div>
-                  </div>
-                  <div className="share-actions">
-                    <button
-                      className={`btn btn-toggle ${share.enabled ? 'on' : ''}`}
-                      onClick={() => handleToggle(share)}
-                      title={share.enabled ? 'Disable' : 'Enable'}
-                    >
-                      {share.enabled ? '●' : '○'}
-                    </button>
-                    <button
-                      className="btn btn-share-action"
-                      onClick={() => handleTest(share.id)}
-                      disabled={testing === share.id}
-                      title="Test connection"
-                    >
-                      {testing === share.id ? '⏳' : '🔗'}
-                    </button>
-                    <button className="btn btn-share-action" onClick={() => handleEdit(share)} title="Edit">✏️</button>
-                    <button className="btn btn-share-action btn-danger" onClick={() => handleDelete(share.id)} title="Delete">🗑️</button>
-                  </div>
-                  {testResult && testResult.id === share.id && (
-                    <div className={`test-result ${testResult.success ? 'success' : 'fail'}`}>
-                      {testResult.success ? '✅' : '❌'} {testResult.message}
-                    </div>
-                  )}
-                </div>
-              ))}
+          {form.provider === 'dropbox' && (
+            <div className="form-row">
+              <label>
+                App Key
+                <input type="text" value={form.credentials.app_key || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials, app_key: e.target.value } }))} placeholder="xxxxxxxxxxxxxx" />
+              </label>
+              <label>
+                App Secret
+                <input type="password" value={form.credentials.app_secret || ''} onChange={e => setForm(f => ({ ...f, credentials: { ...f.credentials, app_secret: e.target.value } }))} placeholder="••••••" />
+              </label>
             </div>
           )}
+
+          <div className="form-actions">
+            <button type="button" className="btn btn-clear" onClick={resetForm}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+          </div>
+        </form>
+      )}
+
+      {loading ? (
+        <div className="shares-loading">Loading cloud providers…</div>
+      ) : (
+        <div className="shares-list">
+          {providers.length === 0 && !showForm && (
+            <div className="shares-empty">No cloud providers configured. Add one to sync footage from the cloud.</div>
+          )}
+          {providers.map(p => {
+            const meta = CLOUD_PROVIDERS.find(c => c.value === p.provider) || {}
+            return (
+              <div key={p.id} className={`share-item ${!p.enabled ? 'disabled' : ''}`}>
+                <div className="share-info">
+                  <div className="share-name">
+                    <span className={`protocol-badge ${p.provider}`}>{meta.icon} {meta.label}</span>
+                    {p.name}
+                  </div>
+                  <div className="share-host">{p.folder_path} &bull; {p.clip_count} clips{p.last_sync ? ` &bull; synced ${new Date(p.last_sync).toLocaleDateString()}` : ''}</div>
+                </div>
+                <div className="share-actions">
+                  <button className="btn btn-share-action" onClick={() => handleSync(p.id)} disabled={syncing === p.id} title="Sync clips">
+                    {syncing === p.id ? '⏳' : '🔄'}
+                  </button>
+                  <button className="btn btn-share-action" onClick={() => handleTest(p.id)} disabled={testing === p.id} title="Test connection">
+                    {testing === p.id ? '⏳' : '🔗'}
+                  </button>
+                  <button className="btn btn-share-action" onClick={() => handleEdit(p)} title="Edit">✏️</button>
+                  <button className="btn btn-share-action btn-danger" onClick={() => handleDelete(p.id)} title="Delete">🗑️</button>
+                </div>
+                {testResults[p.id] && (
+                  <div className={`test-result ${testResults[p.id].success ? 'success' : 'fail'}`}>
+                    {testResults[p.id].success ? '✅' : '❌'} {testResults[p.id].message}
+                  </div>
+                )}
+                {syncResults[p.id] && (
+                  <div className={`test-result ${syncResults[p.id].status === 'ok' ? 'success' : 'fail'}`}>
+                    {syncResults[p.id].status === 'ok' ? '✅' : '❌'} Found {syncResults[p.id].clips_found} clips
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
-      </div>
+      )}
     </div>
   )
 }

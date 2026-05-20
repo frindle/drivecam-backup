@@ -1,4 +1,6 @@
 import os
+import subprocess
+import tempfile
 import threading
 import urllib.parse
 from datetime import datetime
@@ -24,14 +26,25 @@ from .db import (
     delete_remote_share,
     test_remote_share as db_test_remote_share,
     get_all_remote_shares,
+    get_all_cloud_providers,
+    get_cloud_provider,
+    create_cloud_provider,
+    update_cloud_provider,
+    delete_cloud_provider,
+    test_cloud_provider as db_test_cloud_provider,
 )
 from .models import (
     Clip, ClipListResponse, EventSummary, EventListResponse,
     HealthResponse, ScanResponse,
     RemoteShareCreate, RemoteShareUpdate, RemoteShareResponse, RemoteShareTestResponse,
+    CloudProviderCreate, CloudProviderUpdate, CloudProviderResponse, CloudProviderType,
 )
 from .scanner import scan_folder, scan_remote_share, clip_id
-from .thumbnails import CACHE_DIR, ffmpeg_available, generate_thumbnail, get_duration
+from .services import get_cloud_client
+from .services.smb_client import SMBClient
+from .services.ftp_client import FTPClient
+from .services.nfs_client import NFSClient
+from .thumbnails import CACHE_DIR, _check_ffmpeg, _use_cuda, ffmpeg_available, generate_thumbnail, get_duration
 
 SHARE_PATH = os.environ.get("SHARE_PATH", "/share")
 DATA_PATH = os.environ.get("DATA_PATH", "/data")
@@ -52,9 +65,11 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 
 def _build_urls(clip: Clip) -> Clip:
-    path_enc = clip.relativePath.replace("/", "%2F")
-    clip.downloadUrl = f"/api/clips/{path_enc}/video"
-    clip.thumbnailUrl = f"/api/clips/{path_enc}/thumbnail"
+    if clip.source and clip.source not in ("local", "smb", "ftp", "nfs"):
+        return clip
+    clip_id_enc = clip.id
+    clip.downloadUrl = f"/api/shares/{clip.share_id}/clips/{clip_id_enc}/video"
+    clip.thumbnailUrl = f"/api/shares/{clip.share_id}/clips/{clip_id_enc}/thumbnail"
     return clip
 
 
@@ -246,7 +261,11 @@ def trigger_scan():
             return ScanResponse(status="already_scanning", clipsFound=get_clip_count(), cacheUpdated=False)
 
     def do_scan():
-        _refresh_cache_locked()
+        try:
+            _refresh_cache_locked()
+        finally:
+            global _is_scanning
+            _is_scanning = False
 
     t = threading.Thread(target=do_scan, daemon=True)
     t.start()
@@ -273,7 +292,8 @@ def get_thumbnail(path: str):
     if not full_path:
         raise HTTPException(status_code=404, detail="File not found on disk")
 
-    thumb_url = generate_thumbnail(full_path, relative_path, os.path.dirname(full_path))
+    source = clip.source or "local"
+    thumb_url = generate_thumbnail(full_path, relative_path, source, clip.share_id)
     if thumb_url:
         thumb_path = os.path.join(CACHE_DIR, os.path.basename(thumb_url))
         if os.path.exists(thumb_path):
@@ -411,6 +431,390 @@ def test_share(share_id: int):
     return result
 
 
+def _get_share_clip(share_id: int, clip_id: str):
+    shares = get_all_remote_shares()
+    share = next((s for s in shares if s["id"] == share_id), None)
+    if not share:
+        raise HTTPException(status_code=404, detail="Share not found")
+    clips, _, _ = get_all_clips()
+    clip = next((c for c in clips if c.id == clip_id and c.share_id == share_id), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    return share, clip
+
+
+def _stream_share_file(share: dict, relative_path: str, start: int = 0, end: Optional[int] = None) -> bytes:
+    protocol = share["protocol"].lower()
+    if protocol == "smb":
+        client = SMBClient(
+            host=share["host"],
+            port=share.get("port") or 445,
+            username=share.get("username") or "guest",
+            password=share.get("password") or "",
+            share_path=share.get("path") or "/",
+        )
+        connected = client.connect()
+        if not connected:
+            raise HTTPException(status_code=500, detail="Failed to connect to SMB share")
+        try:
+            return client.download_file_range(relative_path, start, end)
+        finally:
+            client.disconnect()
+    elif protocol == "ftp":
+        client = FTPClient(
+            host=share["host"],
+            port=share.get("port") or 21,
+            username=share.get("username") or "anonymous",
+            password=share.get("password") or "",
+        )
+        connected = client.connect()
+        if not connected:
+            raise HTTPException(status_code=500, detail="Failed to connect to FTP server")
+        try:
+            return client.download_file_range(relative_path, start, end)
+        finally:
+            client.disconnect()
+    elif protocol == "nfs":
+        client = NFSClient(
+            host=share["host"],
+            port=share.get("port") or 2049,
+            path=share.get("path") or "/",
+        )
+        connected = client.connect()
+        if not connected:
+            raise HTTPException(status_code=500, detail="Failed to mount NFS share")
+        try:
+            return client.download_file_range(relative_path, start, end)
+        finally:
+            client.disconnect()
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported protocol: {protocol}")
+
+
+@app.get("/api/shares/{share_id}/clips/{clip_id}/video")
+def get_share_video(share_id: int, clip_id: str, range: Optional[str] = Query(None)):
+    share, clip = _get_share_clip(share_id, clip_id)
+    rel_path = clip.relativePath
+
+    if range:
+        try:
+            start_str, end_str = range.replace("bytes=", "").split("-", 1)
+            start = max(0, int(start_str) if start_str else 0)
+            end = max(start, int(end_str) if end_str else clip.size - 1)
+        except ValueError:
+            start, end = 0, clip.size - 1
+
+        data = _stream_share_file(share, rel_path, start, end)
+        return Response(
+            content=data,
+            status_code=206,
+            media_type="video/mp4",
+            headers={
+                "Content-Range": f"bytes {start}-{start + len(data) - 1}/{clip.size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(data)),
+            },
+        )
+    else:
+        data = _stream_share_file(share, rel_path)
+        return Response(
+            content=data,
+            media_type="video/mp4",
+            headers={
+                "Content-Length": str(clip.size),
+                "Accept-Ranges": "bytes",
+            },
+        )
+
+
+@app.get("/api/shares/{share_id}/clips/{clip_id}/thumbnail")
+def get_share_thumbnail(share_id: int, clip_id: str):
+    share, clip = _get_share_clip(share_id, clip_id)
+
+    cache_path = _get_cache_path(clip.relativePath, clip.source, share_id)
+    if os.path.exists(cache_path):
+        return FileResponse(cache_path, media_type="image/jpeg")
+
+    rel_path = clip.relativePath
+    data = _stream_share_file(share, rel_path)
+
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    ffmpeg = _check_ffmpeg()
+    if not ffmpeg:
+        raise HTTPException(status_code=500, detail="FFmpeg not available")
+
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        tmp.write(data)
+        tmp_path = tmp.name
+
+    try:
+        hwaccel = ["-hwaccel", "cuda"] if _use_cuda() else []
+        result = subprocess.run(
+            [
+                ffmpeg, "-y",
+                "-skip_frame", "nokey",
+                *hwaccel,
+                "-i", tmp_path,
+                "-frames:v", "1",
+                "-q:v", "2",
+                cache_path,
+            ],
+            capture_output=True, timeout=60,
+        )
+        if result.returncode == 0 and os.path.exists(cache_path):
+            return FileResponse(cache_path, media_type="image/jpeg")
+    except subprocess.SubprocessError:
+        pass
+    finally:
+        os.unlink(tmp_path)
+
+    raise HTTPException(status_code=404, detail="Thumbnail not available")
+
+
+ # ─── Cloud Providers ──────────────────────────────────────────
+
+@app.get("/api/cloud/providers", response_model=List[CloudProviderResponse])
+def list_cloud_providers():
+    providers = get_all_cloud_providers()
+    return [
+        CloudProviderResponse(
+            id=p["id"],
+            name=p["name"],
+            provider=p["provider"],
+            folder_path=p["folder_path"],
+            enabled=p["enabled"],
+            connected=p.get("connected", False),
+            clip_count=p.get("clip_count", 0),
+            last_sync=p["last_sync"],
+            created_at=p["created_at"],
+            updated_at=p["updated_at"],
+        )
+        for p in providers
+    ]
+
+
+@app.post("/api/cloud/providers", response_model=CloudProviderResponse)
+def add_cloud_provider(provider: CloudProviderCreate):
+    provider_id = create_cloud_provider(
+        name=provider.name,
+        provider=provider.provider.value,
+        credentials=provider.credentials,
+        folder_path=provider.folder_path,
+    )
+    created = get_cloud_provider(provider_id)
+    if not created:
+        raise HTTPException(status_code=500, detail="Provider was created but could not be retrieved")
+    return CloudProviderResponse(
+        id=created["id"],
+        name=created["name"],
+        provider=created["provider"],
+        folder_path=created["folder_path"],
+        enabled=created["enabled"],
+        connected=False,
+        clip_count=0,
+        last_sync=None,
+        created_at=created["created_at"],
+        updated_at=created["updated_at"],
+    )
+
+
+@app.put("/api/cloud/providers/{provider_id}", response_model=CloudProviderResponse)
+def edit_cloud_provider(provider_id: int, provider: CloudProviderUpdate):
+    update_cloud_provider(
+        provider_id=provider_id,
+        name=provider.name,
+        folder_path=provider.folder_path,
+        enabled=provider.enabled,
+        credentials=provider.credentials,
+    )
+    updated = get_cloud_provider(provider_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    return CloudProviderResponse(
+        id=updated["id"],
+        name=updated["name"],
+        provider=updated["provider"],
+        folder_path=updated["folder_path"],
+        enabled=updated["enabled"],
+        connected=False,
+        clip_count=updated.get("clip_count", 0),
+        last_sync=updated.get("last_sync"),
+        created_at=updated["created_at"],
+        updated_at=updated["updated_at"],
+    )
+
+
+@app.delete("/api/cloud/providers/{provider_id}")
+def remove_cloud_provider(provider_id: int):
+    deleted = delete_cloud_provider(provider_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    return {"status": "deleted"}
+
+
+@app.post("/api/cloud/providers/{provider_id}/test")
+def test_cloud_provider(provider_id: int):
+    return db_test_cloud_provider(provider_id)
+
+
+@app.post("/api/cloud/providers/{provider_id}/sync")
+def sync_cloud_provider(provider_id: int):
+    from .scanner import clip_id as make_clip_id
+
+    with _scan_lock:
+        provider = get_cloud_provider(provider_id)
+        if not provider:
+            raise HTTPException(status_code=404, detail="Provider not found")
+
+        try:
+            client = get_cloud_client(provider["provider"], provider["credentials"], provider["folder_path"])
+            raw_clips = client.scan_clips(provider["folder_path"])
+        except Exception as e:
+            return {"status": "error", "clips_found": 0, "message": str(e)}
+
+        clips = []
+        for rc in raw_clips:
+            cid = make_clip_id(rc.get("relative_path", rc.get("name", "")))
+            clip_id_str = f"cloud:{provider_id}:{cid}"
+            clips.append(Clip(
+                id=clip_id_str,
+                filename=rc["name"],
+                relativePath=rc["relative_path"],
+                folder=rc["folder"],
+                vehicle=rc["vehicle"],
+                eventType=rc["event_type"],
+                cameraAngle=rc["camera_angle"],
+                timestamp=rc.get("timestamp"),
+                eventKey=rc.get("event_key"),
+                duration=None,
+                size=rc["size"],
+                sizeString=rc["size_string"],
+                hasThumbnail=False,
+                hasVideo=True,
+                downloadUrl=f"/api/cloud/clips/{clip_id_str}/video",
+                thumbnailUrl=f"/api/cloud/clips/{clip_id_str}/thumbnail",
+                source=provider["provider"],
+                share_id=provider_id,
+            ))
+
+        upsert_clips(clips)
+        update_cloud_provider(provider_id, clip_count=len(clips), last_sync=datetime.utcnow().isoformat())
+        return {"status": "ok", "clips_found": len(clips)}
+
+
+@app.get("/api/cloud/clips/{clip_id}/video")
+def get_cloud_video(clip_id: str, range: Optional[str] = Query(None)):
+    clips, _, _ = get_all_clips()
+    clip = next((c for c in clips if c.id == clip_id), None)
+    if not clip or not clip.source:
+        raise HTTPException(status_code=404, detail="Cloud clip not found")
+
+    provider = get_cloud_provider(clip.share_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Cloud provider not found")
+
+    try:
+        client = get_cloud_client(clip.source, provider["credentials"], provider["folder_path"])
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    def stream_from_cloud():
+        for chunk in client.get_file(clip.relativePath):
+            yield chunk
+
+    try:
+        if range:
+            try:
+                start, end_str = range.replace("bytes=", "").split("-", 1)
+                start = max(0, int(start) if start else 0)
+                end = max(start, int(end_str) if end_str else clip.size - 1)
+            except ValueError:
+                start, end = 0, clip.size - 1
+
+            def range_stream():
+                iterator = client.get_file(clip.relativePath)
+                yielded = 0
+                for chunk in iterator:
+                    chunk_len = len(chunk)
+                    chunk_start = yielded
+                    chunk_end = yielded + chunk_len - 1
+                    if chunk_end < start:
+                        yielded += chunk_len
+                        continue
+                    if chunk_start > end:
+                        break
+                    s = max(0, start - chunk_start)
+                    e = min(chunk_len - 1, end - chunk_start)
+                    yield chunk[s:e + 1]
+                    yielded += chunk_len
+                    if yielded > end:
+                        break
+
+            return Response(
+                content=range_stream(),
+                status_code=206,
+                media_type="video/mp4",
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{clip.size}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(end - start + 1),
+                },
+            )
+        else:
+            return Response(
+                content=stream_from_cloud(),
+                media_type="video/mp4",
+                headers={
+                    "Content-Length": str(clip.size),
+                    "Accept-Ranges": "bytes",
+                },
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/cloud/clips/{clip_id}/thumbnail")
+def get_cloud_thumbnail(clip_id: str):
+    clips, _, _ = get_all_clips()
+    clip = next((c for c in clips if c.id == clip_id), None)
+    if not clip or not clip.source:
+        raise HTTPException(status_code=404, detail="Cloud clip not found")
+
+    provider = get_cloud_provider(clip.share_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Cloud provider not found")
+
+    try:
+        client = get_cloud_client(clip.source, provider["credentials"], provider["folder_path"])
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        thumb_data = client.get_thumbnail(clip.relativePath)
+        if not thumb_data:
+            raise HTTPException(status_code=404, detail="Thumbnail not available")
+        return Response(content=thumb_data, media_type="image/jpeg")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/cloud/oauth/{provider}/url")
+def get_oauth_url(provider: str):
+    try:
+        provider_enum = CloudProviderType(provider)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+    try:
+        client = get_cloud_client(provider_enum.value, {"redirect_uri": "http://localhost:8765/api/cloud/oauth/callback"})
+        url = client.get_auth_url("http://localhost:8765/api/cloud/oauth/callback", "state123")
+        return {"url": url}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 static_dir = Path(STATIC_PATH)
 if static_dir.exists():
     app.mount("/", StaticFiles(directory=STATIC_PATH, html=True), name="static")
@@ -423,4 +827,9 @@ else:
 @app.on_event("startup")
 def startup():
     if not get_clip_count():
-        _refresh_cache_locked()
+
+        def do_startup_scan():
+            _refresh_cache_locked()
+
+        t = threading.Thread(target=do_startup_scan, daemon=True)
+        t.start()

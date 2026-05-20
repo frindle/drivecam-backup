@@ -31,6 +31,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         "uvicorn[standard]==0.27.1" \
         pydantic==2.6.1 \
         smbprotocol>=1.12.0 \
+        pyicloud>=1.14.0 \
+        google-api-python-client>=2.100.0 \
+        google-auth-oauthlib>=1.0.0 \
+        msgraph-sdk>=1.0.0 \
+        dropbox>=11.0.0 \
+        aioftp>=0.22.0 \
         python-nfs>=0.2.0
 
 ENV DATA_PATH=/data
