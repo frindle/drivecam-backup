@@ -131,14 +131,18 @@ function ImportPanel({ onClose, onImported }) {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
-  const selectDirChrome = async () => {
+  const selectDir = async () => {
     try {
       setMessage('Scanning for video files…')
       setError('')
-      const handle = await window.showDirectoryPicker({ mode: 'read' })
-      const found = await getFilesFromDir(handle)
-      setFiles(found)
-      setMessage(`${found.length} video file(s) found`)
+      if (typeof window.showDirectoryPicker !== 'undefined') {
+        const handle = await window.showDirectoryPicker({ mode: 'read' })
+        const found = await getFilesFromDir(handle)
+        setFiles(found)
+        setMessage(`${found.length} video file(s) found`)
+      } else {
+        fileInputRef.current?.click()
+      }
     } catch (e) {
       if (e.name !== 'AbortError') setError('Failed to open SD card: ' + e.message)
     }
@@ -165,33 +169,33 @@ function ImportPanel({ onClose, onImported }) {
     setProgress(0)
     setError('')
 
-    let saved = 0
-    const errors = []
+    const safePaths = files.map(({ path, file: fileObj }) => {
+      const safe = path.replace(/^\//, '')
+      return { safe, file: fileObj }
+    })
 
-    for (let i = 0; i < files.length; i++) {
-      const { path, file: fileObj } = files[i]
-      const safePath = path.replace(/^\//, '')
-      const formData = new FormData()
-      formData.append('paths', JSON.stringify([safePath]))
-      formData.append('files', fileObj, fileObj.name)
+    const formData = new FormData()
+    formData.append('paths', JSON.stringify(safePaths.map(p => p.safe)))
+    for (const { file } of safePaths) {
+      formData.append('files', file, file.name)
+    }
 
-      try {
-        const res = await fetch('/api/upload', { method: 'POST', body: formData })
-        if (res.ok) saved++
-        else {
-          const err = await res.json().catch(() => ({ detail: res.statusText }))
-          errors.push(`${path}: ${err.detail || 'upload failed'}`)
-        }
-      } catch (e) {
-        errors.push(`${path}: ${e.message}`)
-      }
-      setProgress(Math.round(((i + 1) / files.length) * 100))
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', body: formData })
+      const data = await res.json()
+      setProgress(100)
+
+      let msg = `Imported ${data.saved} file(s)`
+      if (data.skipped > 0) msg += `, ${data.skipped} already imported`
+      if (data.errors?.length) msg += `, ${data.errors.length} failed`
+      setMessage(msg)
+      if (data.errors?.length) setError(data.errors.slice(0, 5).join('\n'))
+      if (data.saved > 0) onImported()
+    } catch (e) {
+      setError('Upload failed: ' + e.message)
     }
 
     setUploading(false)
-    setMessage(`Imported ${saved}/${files.length} file(s)`)
-    if (errors.length) setError(errors.slice(0, 5).join('\n'))
-    if (saved > 0) onImported()
   }
 
   const grouped = {}
@@ -219,19 +223,10 @@ function ImportPanel({ onClose, onImported }) {
           <div className="import-buttons">
             <button
               className="btn btn-primary"
-              onClick={selectDirChrome}
+              onClick={selectDir}
               disabled={uploading}
-              title="Chrome/Edge: Select folder directly"
             >
               📂 Select SD Card Folder
-            </button>
-            <button
-              className="btn btn-secondary"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              title="Firefox/Safari: Select folder to import from"
-            >
-              📁 Choose Folder
             </button>
           </div>
 

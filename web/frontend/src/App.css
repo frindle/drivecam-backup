@@ -6,10 +6,10 @@
 
 /* ─── Light Mode Base ───────────────────────────────────── */
 :root:not([data-dark]) {
-  --bg: #f5f7fa;
+  --bg: #eef1f5;
   --surface: #ffffff;
-  --surface2: #f0f2f5;
-  --border: #e2e8f0;
+  --surface2: #e4e8ee;
+  --border: #cdd4de;
   --text: #1a202c;
   --text-muted: #64748b;
   --radius: 10px;

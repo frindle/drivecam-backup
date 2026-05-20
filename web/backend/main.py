@@ -33,6 +33,8 @@ from .db import (
     update_cloud_provider,
     delete_cloud_provider,
     test_cloud_provider as db_test_cloud_provider,
+    is_clip_imported,
+    mark_clips_imported,
 )
 from .models import (
     Clip, ClipListResponse, EventSummary, EventListResponse,
@@ -828,29 +830,42 @@ def upload_clips(paths: str = Form(...), files: List[UploadFile] = File(...)):
         raise HTTPException(status_code=400, detail=f"Path count ({len(file_paths)}) must match file count ({len(files)})")
 
     saved = []
+    skipped = []
     errors = []
+    imported_records = []
 
     for i, (relative_path, file) in enumerate(zip(file_paths, files)):
         safe_path = relative_path.replace("..", "").lstrip("/")
-        dest_path = Path(DATA_PATH) / safe_path
+
+        if is_clip_imported(safe_path):
+            skipped.append(safe_path)
+            continue
 
         try:
+            content = b""
+            while chunk := file.file.read(64 * 1024 * 1024):
+                content += chunk
+            size_bytes = len(content)
+            dest_path = Path(DATA_PATH) / safe_path
             dest_path.parent.mkdir(parents=True, exist_ok=True)
-            with dest_path.open("wb") as f:
-                while chunk := file.file.read(64 * 1024 * 1024):
-                    f.write(chunk)
+            dest_path.write_bytes(content)
             saved.append(safe_path)
+            imported_records.append({"file_path": safe_path, "size_bytes": size_bytes})
         except Exception as e:
             errors.append(f"{safe_path}: {e}")
 
+    if imported_records:
+        mark_clips_imported(imported_records)
     trigger_scan()
 
     return {
         "success": len(errors) == 0,
         "saved": len(saved),
         "savedPaths": saved,
+        "skipped": len(skipped),
+        "skippedPaths": skipped,
         "errors": errors,
-        "message": f"Saved {len(saved)} file(s)" + (f", {len(errors)} failed" if errors else ""),
+        "message": f"Saved {len(saved)} file(s)" + (f", {len(errors)} failed" if errors else "") + (f", {len(skipped)} already imported" if skipped else ""),
     }
 
 

@@ -64,6 +64,14 @@ def _get_conn():
             updated_at  TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS imported_clips (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_path   TEXT NOT NULL UNIQUE,
+            size_bytes  INTEGER NOT NULL,
+            imported_at TEXT NOT NULL
+        )
+    """)
     try:
         yield conn
     finally:
@@ -496,3 +504,35 @@ def test_cloud_provider(provider_id: int) -> dict:
         return client.test_connection()
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+# ─── Imported Clips (dedup) ─────────────────────────────────
+
+def is_clip_imported(file_path: str) -> bool:
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM imported_clips WHERE file_path = ?",
+            (file_path,),
+        ).fetchone()
+        return row is not None
+
+
+def mark_clips_imported(imported_paths: List[dict]) -> int:
+    now = datetime.utcnow().isoformat()
+    count = 0
+    with _get_conn() as conn:
+        for item in imported_paths:
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO imported_clips (file_path, size_bytes, imported_at)
+                   VALUES (?, ?, ?)""",
+                (item["file_path"], item["size_bytes"], now),
+            )
+            if cur.rowcount > 0:
+                count += 1
+    return count
+
+
+def get_imported_count() -> int:
+    with _get_conn() as conn:
+        row = conn.execute("SELECT COUNT(*) FROM imported_clips").fetchone()
+        return row[0] if row else 0
