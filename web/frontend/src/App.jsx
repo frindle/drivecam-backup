@@ -72,7 +72,7 @@ function StorageCalculator({ stats, onImportClick }) {
     return (
       <div className="storage-calculator">
         <span className="storage-label">No footage yet.</span>
-        <button className="btn btn-sm" onClick={onImportClick}>📥 Import SD Card</button>
+        <span className="storage-label">Import SD Card to get started.</span>
       </div>
     )
   }
