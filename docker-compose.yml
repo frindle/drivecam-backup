@@ -1,6 +1,6 @@
 services:
   drivecam-web:
-    build: ./web
+    image: ghcr.io/frindle/drivecam-backup/drivecam-web:latest
     container_name: drivecam-web
     ports:
       - "8000:8000"
