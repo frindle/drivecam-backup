@@ -29,7 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3.10 /usr/local/bin/python \
-    && ln -sf /usr/bin/pip3 /usr/local/bin/pip
+    && ln -sf /usr/bin/pip3 /usr/local/bin/pip \
+    && pip install --no-cache-dir --upgrade pip
 
 RUN pip install --no-cache-dir --break-system-packages \
     fastapi==0.109.2 "uvicorn[standard]==0.27.1" pydantic==2.6.1
