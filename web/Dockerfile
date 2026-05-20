@@ -1,15 +1,21 @@
 # Build: docker build -t drivecam-web .
 # Run:   docker compose up
+# Requires nvidia-container-toolkit on the host and "nvidia" runtime configured
 
-FROM python:3.11-slim AS base
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04 AS base
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3-pip ffmpeg curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/bin/python3.11 /usr/local/bin/python \
+    && ln -s /usr/bin/pip3 /usr/local/bin/pip
+
 WORKDIR /app
 
 # ── Stage 1: Build React frontend ───────────────────────
 FROM node:20-alpine AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
+RUN npm install --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
@@ -17,9 +23,18 @@ RUN npm run build
 FROM base AS production
 COPY --from=frontend /src/frontend/dist ./backend/static/
 COPY backend/ ./backend/
-RUN pip install --no-cache-dir fastapi==0.109.2 uvicorn==0.27.1 pydantic==2.6.1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libkrb5-dev gcc g++ python3-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir \
+        fastapi==0.109.2 \
+        "uvicorn[standard]==0.27.1" \
+        pydantic==2.6.1 \
+        smbprotocol>=1.12.0 \
+        python-nfs>=0.2.0
 
-ENV SHARE_PATH=/share
+ENV DATA_PATH=/data
+ENV SHARE_PATH=/data
 ENV STATIC_PATH=/app/backend/static
 
 EXPOSE 8000

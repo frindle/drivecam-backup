@@ -1,4 +1,4 @@
-# DriveCam Backup
+# Drivecam Backup
 
 iPhone app that reads dashcam footage from a USB drive and uploads it to a Samba share on an Unraid NAS. Supports Tesla and Rivian (more vehicles easy to add).
 
