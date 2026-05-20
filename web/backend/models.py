@@ -194,3 +194,27 @@ class CloudSyncResponse(BaseModel):
     provider_id: int
     clips_found: int
     status: str
+
+
+class UploadRequest(BaseModel):
+    vehicle: str = Field(description="Vehicle folder: TeslaCam, rivian_dashcam, etc.")
+    folder: str = Field(description="Clip folder: RecentClips, SavedClips, dashcam, etc.")
+    filename: str
+
+
+class UploadResponse(BaseModel):
+    success: bool
+    path: str
+    message: str
+
+
+class StorageStatsResponse(BaseModel):
+    total_clips: int
+    total_size_bytes: int
+    total_size_string: str
+    avg_clip_size_bytes: int
+    avg_clip_size_string: str
+    clips_per_hour: float
+    hours_of_footage: float
+    vehicles: dict
+    by_vehicle: dict

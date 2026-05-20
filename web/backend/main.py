@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -38,8 +38,9 @@ from .models import (
     HealthResponse, ScanResponse,
     RemoteShareCreate, RemoteShareUpdate, RemoteShareResponse, RemoteShareTestResponse,
     CloudProviderCreate, CloudProviderUpdate, CloudProviderResponse, CloudProviderType,
+    UploadResponse, StorageStatsResponse,
 )
-from .scanner import scan_folder, scan_remote_share, clip_id
+from .scanner import scan_folder, scan_remote_share, clip_id, byte_count_fmt
 from .services import get_cloud_client
 from .services.smb_client import SMBClient
 from .services.ftp_client import FTPClient
@@ -813,6 +814,116 @@ def get_oauth_url(provider: str):
         return {"url": url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/upload")
+def upload_clips(paths: str = Form(...), files: List[UploadFile] = File(...)):
+    try:
+        file_paths = json.loads(paths)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid paths JSON")
+
+    if len(file_paths) != len(files):
+        raise HTTPException(status_code=400, detail=f"Path count ({len(file_paths)}) must match file count ({len(files)})")
+
+    saved = []
+    errors = []
+
+    for i, (relative_path, file) in enumerate(zip(file_paths, files)):
+        safe_path = relative_path.replace("..", "").lstrip("/")
+        dest_path = Path(DATA_PATH) / safe_path
+
+        try:
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            with dest_path.open("wb") as f:
+                while chunk := file.file.read(64 * 1024 * 1024):
+                    f.write(chunk)
+            saved.append(safe_path)
+        except Exception as e:
+            errors.append(f"{safe_path}: {e}")
+
+    trigger_scan()
+
+    return {
+        "success": len(errors) == 0,
+        "saved": len(saved),
+        "savedPaths": saved,
+        "errors": errors,
+        "message": f"Saved {len(saved)} file(s)" + (f", {len(errors)} failed" if errors else ""),
+    }
+
+
+@app.get("/api/stats/storage", response_model=StorageStatsResponse)
+def storage_stats():
+    clips, _, _ = get_all_clips(limit=10000)
+    if not clips:
+        return StorageStatsResponse(
+            total_clips=0, total_size_bytes=0, total_size_string="0 B",
+            avg_clip_size_bytes=0, avg_clip_size_string="0 B",
+            clips_per_hour=0.0, hours_of_footage=0.0,
+            vehicles={}, by_vehicle={},
+        )
+
+    total_size = sum(c.size for c in clips)
+    avg_clip = total_size // len(clips) if clips else 0
+    size_str = byte_count_fmt(total_size) if clips else "0 B"
+    avg_str = byte_count_fmt(avg_clip) if clips else "0 B"
+
+    by_vehicle: dict = {}
+    for c in clips:
+        v = c.vehicle.value
+        if v not in by_vehicle:
+            by_vehicle[v] = {"clips": 0, "size": 0, "timestamps": []}
+        by_vehicle[v]["clips"] += 1
+        by_vehicle[v]["size"] += c.size
+        if c.timestamp:
+            by_vehicle[v]["timestamps"].append(c.timestamp)
+
+    for v in by_vehicle:
+        ts = sorted(by_vehicle[v]["timestamps"])
+        if len(ts) >= 2:
+            span = (ts[-1] - ts[0]).total_seconds() / 3600
+            by_vehicle[v]["clips_per_hour"] = by_vehicle[v]["clips"] / span if span > 0 else 0
+            by_vehicle[v]["hours_of_footage"] = span
+        else:
+            by_vehicle[v]["clips_per_hour"] = 0
+            by_vehicle[v]["hours_of_footage"] = 0
+        del by_vehicle[v]["timestamps"]
+
+    all_ts = [c.timestamp for c in clips if c.timestamp]
+    clips_per_hour = 0.0
+    hours_of_footage = 0.0
+    if len(all_ts) >= 2:
+        sorted_ts = sorted(all_ts)
+        span_h = (sorted_ts[-1] - sorted_ts[0]).total_seconds() / 3600
+        hours_of_footage = span_h
+        clips_per_hour = len(clips) / span_h if span_h > 0 else 0
+
+    vehicle_info = {v: {"clips": d["clips"], "size": d["size"]} for v, d in by_vehicle.items()}
+
+    return StorageStatsResponse(
+        total_clips=len(clips),
+        total_size_bytes=total_size,
+        total_size_string=size_str,
+        avg_clip_size_bytes=avg_clip,
+        avg_clip_size_string=avg_str,
+        clips_per_hour=round(clips_per_hour, 1),
+        hours_of_footage=round(hours_of_footage, 1),
+        vehicles=vehicle_info,
+        by_vehicle=by_vehicle,
+    )
+
+
+@app.get("/api/vehicles/folders")
+def list_vehicle_folders():
+    return {
+        "TeslaCam": ["RecentClips", "SavedClips", "SentryClips"],
+        "rivian_dashcam": ["dashcam", "saved", "gearguard"],
+        "TeslaModel3": ["RecentClips", "SavedClips", "SentryClips"],
+        "TeslaModelS": ["RecentClips", "SavedClips", "SentryClips"],
+        "TeslaModelX": ["RecentClips", "SavedClips", "SentryClips"],
+        "TeslaModelY": ["RecentClips", "SavedClips", "SentryClips"],
+    }
 
 
 static_dir = Path(STATIC_PATH)

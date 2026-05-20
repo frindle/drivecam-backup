@@ -140,3 +140,20 @@ export async function syncCloudProvider(providerId) {
 export async function getCloudOAuthUrl(provider) {
   return apiFetch(`/cloud/oauth/${provider}/url`);
 }
+
+export async function uploadFiles(formData) {
+  const res = await fetch(`${BASE}/upload`, { method: 'POST', body: formData });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Upload failed');
+  }
+  return res.json();
+}
+
+export async function getStorageStats() {
+  return apiFetch('/stats/storage');
+}
+
+export async function getVehicleFolders() {
+  return apiFetch('/vehicles/folders');
+}

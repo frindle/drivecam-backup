@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl } from './api'
+import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, getStorageStats } from './api'
 
 const EVENT_COLORS = {
   driving: '#3b82f6',
@@ -57,6 +57,184 @@ function groupByDate(events) {
   return groups
 }
 
+function byteCountFmt(bytes) {
+  if (bytes === 0) return '0 B'
+  for (const unit of ['B', 'KB', 'MB', 'GB', 'TB']) {
+    if (bytes < 1024) return `${bytes.toFixed(1)} ${unit}`
+    bytes /= 1024
+  }
+  return `${bytes.toFixed(1)} PB`
+}
+
+function StorageCalculator({ stats }) {
+  if (!stats || !stats.total_clips) return null
+  const { clips_per_hour, total_size_bytes, total_clips } = stats
+  if (!clips_per_hour || clips_per_hour === 0) return null
+
+  const GB = 1024 ** 3
+  const sizes = [
+    { label: '256 GB', gb: 256 },
+    { label: '512 GB', gb: 512 },
+    { label: '1 TB', gb: 1024 },
+  ]
+
+  return (
+    <div className="storage-calculator">
+      <span className="storage-label">SD card estimate:</span>
+      {sizes.map(({ label, gb }) => {
+        const bytesPerHour = clips_per_hour * (total_size_bytes / total_clips)
+        const hoursLeft = (gb * GB) / bytesPerHour
+        const daysLeft = hoursLeft / 24
+        return (
+          <span key={label} className="storage-estimate" title={`${Math.round(hoursLeft)}h of footage`}>
+            {label}: <strong>{daysLeft < 1 ? `${Math.round(hoursLeft)}h` : `${Math.round(daysLeft)}d`}</strong>
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+async function getFilesFromDir(dirHandle) {
+  const files = []
+  async function walk(dir, path = '') {
+    for await (const entry of dir.values()) {
+      const entryPath = path ? `${path}/${entry.name}` : entry.name
+      if (entry.kind === 'directory') {
+        const subDir = await dir.getDirectoryHandle(entry.name)
+        await walk(subDir, entryPath)
+      } else if (entry.kind === 'file') {
+        const ext = entry.name.split('.').pop().toLowerCase()
+        if (['mp4', 'mov', 'ts', 'avi', 'mkv'].includes(ext)) {
+          files.push({ path: entryPath, handle: entry })
+        }
+      }
+    }
+  }
+  await walk(dirHandle)
+  return files
+}
+
+function ImportPanel({ onClose, onImported }) {
+  const [dirHandle, setDirHandle] = useState(null)
+  const [files, setFiles] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+
+  const selectDir = async () => {
+    try {
+      const handle = await window.showDirectoryPicker({ mode: 'read' })
+      setDirHandle(handle)
+      setMessage('Scanning for video files…')
+      setError('')
+      const found = await getFilesFromDir(handle)
+      setFiles(found)
+      setMessage(`${found.length} video file(s) found`)
+    } catch (e) {
+      if (e.name !== 'AbortError') setError('Failed to open SD card: ' + e.message)
+    }
+  }
+
+  const handleUpload = async () => {
+    if (!files.length) return
+    setUploading(true)
+    setProgress(0)
+    setError('')
+
+    const paths = files.map(f => f.path)
+    const total = files.length
+    let saved = 0
+    const errors = []
+
+    for (let i = 0; i < files.length; i++) {
+      const { path, handle } = files[i]
+      const safePath = path.replace(/^\//, '')
+      const formData = new FormData()
+      formData.append('paths', JSON.stringify([safePath]))
+      const fileObj = await handle.getFile()
+      formData.append('files', fileObj, fileObj.name)
+
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: formData })
+        if (res.ok) saved++
+        else {
+          const err = await res.json().catch(() => ({ detail: res.statusText }))
+          errors.push(`${path}: ${err.detail || 'upload failed'}`)
+        }
+      } catch (e) {
+        errors.push(`${path}: ${e.message}`)
+      }
+      setProgress(Math.round(((i + 1) / total) * 100))
+    }
+
+    setUploading(false)
+    setMessage(`Imported ${saved}/${total} file(s)`)
+    if (errors.length) setError(errors.slice(0, 5).join('\n'))
+    if (saved > 0) onImported()
+  }
+
+  const grouped = {}
+  for (const f of files) {
+    const parts = f.path.split('/')
+    const key = parts.slice(0, -1).join('/') || '/'
+    if (!grouped[key]) grouped[key] = []
+    grouped[key].push(f)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="import-panel">
+        <div className="modal-header">
+          <h2>📥 Import from SD Card</h2>
+          <button className="btn btn-icon" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="import-body">
+          <p className="import-desc">
+            Select the root folder of your SD card (TeslaCam, USB DRIVE, etc.).<br />
+            Subfolders like RecentClips, SavedClips, dashcam are auto-detected.
+          </p>
+
+          <button className="btn btn-primary" onClick={selectDir} disabled={uploading}>
+            📂 Select SD Card Folder
+          </button>
+
+          {message && <div className="import-message">{message}</div>}
+          {error && <div className="import-error">{error}</div>}
+
+          {files.length > 0 && (
+            <>
+              <div className="import-summary">
+                {Object.entries(grouped).map(([folder, fls]) => (
+                  <div key={folder} className="import-folder">
+                    <span className="import-folder-name">{folder}/</span>
+                    <span className="import-folder-count">{fls.length} file(s)</span>
+                  </div>
+                ))}
+              </div>
+
+              {uploading ? (
+                <div className="import-progress">
+                  <div className="progress-bar">
+                    <div className="progress-fill" style={{ width: `${progress}%` }} />
+                  </div>
+                  <span>{progress}%</span>
+                </div>
+              ) : (
+                <button className="btn btn-primary" onClick={handleUpload}>
+                  ▶ Import {files.length} File{files.length !== 1 ? 's' : ''}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [events, setEvents] = useState([])
   const [filterVehicle, setFilterVehicle] = useState('')
@@ -79,6 +257,8 @@ export default function App() {
   const [currentColorTheme, setCurrentColorTheme] = useState('default')
   const [isDark, setIsDark] = useState(true)
   const [showShares, setShowShares] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [storageStats, setStorageStats] = useState(null)
   const [hasMore, setHasMore] = useState(false)
   const [oldestTimestamp, setOldestTimestamp] = useState(null)
   const loadMoreRef = useRef(null)
@@ -204,6 +384,10 @@ export default function App() {
     }
   }, [currentColorTheme, isDark])
 
+  useEffect(() => {
+    getStorageStats().then(setStorageStats).catch(() => setStorageStats(null))
+  }, [])
+
   const handleRescan = async () => {
     setScanning(true)
     try {
@@ -254,6 +438,9 @@ export default function App() {
           <button className="btn btn-icon" onClick={() => setShowShares(true)} title="Manage Shares">
             📁
           </button>
+          <button className="btn btn-icon" onClick={() => setShowImport(true)} title="Import from SD Card">
+            📤
+          </button>
           <span className="clip-count">{eventCount} events{hasMore ? '+' : ''}</span>
           {gearGuardCount > 0 && (
             <span className="badge gear-guard">{gearGuardCount} Gear Guard</span>
@@ -263,6 +450,8 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      <StorageCalculator stats={storageStats} />
 
       <div className="filter-bar">
         <div className="filter-row">
@@ -352,6 +541,17 @@ export default function App() {
         <SharesPanel
           onClose={() => setShowShares(false)}
           onSaved={loadEvents}
+        />
+      )}
+
+      {showImport && (
+        <ImportPanel
+          onClose={() => setShowImport(false)}
+          onImported={() => {
+            setShowImport(false)
+            loadEvents()
+            getStorageStats().then(setStorageStats).catch(() => {})
+          }}
         />
       )}
     </div>
