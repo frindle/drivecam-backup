@@ -19,12 +19,10 @@ FROM base AS production
 COPY --from=frontend /src/frontend/dist ./backend/static/
 COPY backend/ ./backend/
 
-# Install system deps — Ubuntu universe + NVIDIA CUDA repo
+# Install system deps — Ubuntu universe (no CUDA needed at build time, runtime injects GPU via nvidia-container-toolkit)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates gnupg \
-    && curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/3c0b14b9f0e83e28d2c6c67c82fd9e019a5e23f8c6dd3a2b24cc2f0500034a0b-nvidia-repo.pub | apt-key add - \
-    && echo "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /" > /etc/apt/sources.list.d/cuda.list \
-    && echo "deb http://archive.ubuntu.com/ubuntu jammy universe" >> /etc/apt/sources.list \
+    software-properties-common \
+    && add-apt-repository --yes universe \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
     build-essential libkrb5-dev python3-dev python3-pip \
