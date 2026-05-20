@@ -24,9 +24,10 @@ FROM base AS production
 COPY --from=frontend /src/frontend/dist ./backend/static/
 COPY backend/ ./backend/
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libkrb5-dev gcc g++ python3-dev \
+    libkrb5-dev gcc g++ python3-dev libtirpc-dev \
+    libxml2-dev libxmlsec1-dev libxmlsec1-openssl pkg-config \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir \
+    && pip install --no-cache-dir --break-system-packages \
         fastapi==0.109.2 \
         "uvicorn[standard]==0.27.1" \
         pydantic==2.6.1 \
