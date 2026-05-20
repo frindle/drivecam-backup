@@ -4,45 +4,75 @@ iPhone app that reads dashcam footage from a USB drive and uploads it to a Samba
 
 ## Web Viewer
 
-A Docker-based web interface for viewing dashcam footage with timeline filtering, video playback, and thumbnail previews.
+A Docker-based web interface for viewing dashcam footage with timeline filtering, video playback, GPU-accelerated thumbnails, and cloud provider sync.
 
 ### Features
 
-- **Multi-path support**: Scan footage from `/share` or `/data` Docker volume mounts
+- **Multi-path support**: Scan footage from `/data` Docker volume mounts
 - **Vehicle detection**: Automatically detects Tesla and Rivian footage from folder structure
 - **Event filtering**: Filter by vehicle type, event type (drivecam, activations, gear guard), camera angle, folder, and date range
 - **Timeline UI**: Dark theme interface with video player and thumbnail previews
-- **Gear Guard highlighting**: Amber badge for security event clips
+- **GPU-accelerated thumbnails**: FFmpeg with CUDA decode for fast thumbnail generation
 - **Video streaming**: HTTP Range support for seeking within videos
 - **Thumbnail caching**: FFmpeg-generated thumbnails with SQLite metadata cache
+- **Cloud provider sync**: iCloud, Google Drive, OneDrive, Dropbox with OAuth authentication
+- **Remote share streaming**: SMB/FTP/NFS clips stream directly from network shares
 
-### Quick Start
+### Deploy on Unraid (Recommended)
 
 ```bash
-cd web
-docker-compose up -d
+# Clone and run
+cd /mnt/user/appdata
+git clone https://github.com/frindle/iphone-drive-cam-backup.git
+cd iphone-drive-cam-backup
+docker compose up -d
 ```
 
-Access at `http://localhost:8000`
+Access at `http://<unraid-ip>:8000`
 
-### Docker Volume Mounts
+### Update on Unraid
 
-Choose one or both volume mounts depending on your setup:
+```bash
+cd /mnt/user/appdata/iphone-drive-cam-backup
+git pull origin main
+docker compose up -d
+```
+
+### GPU Acceleration
+
+The Docker image includes `nvidia/cuda:12.1.0-runtime` and FFmpeg with CUDA support. Requires:
+
+- NVIDIA GPU passthrough to the container
+- `nvidia-container-toolkit` installed on the host
+- `runtime: nvidia` in docker-compose (already configured)
+
+If no GPU is available, thumbnails fall back to CPU encode.
+
+### Docker Volume Mount
 
 ```yaml
 volumes:
-  # Option 1: Mount your NAS share
-  - /path/to/nas/share:/share:ro
-
-  # Option 2: Mount local data directory
-  - /path/to/local/data:/data:ro
+  - /mnt/user/data/Media/Drivecam:/data:ro
 ```
+
+Change the host path to match your actual footage location.
+
+### Cloud Provider Sync
+
+1. Go to **Settings → Cloud**
+2. Click **Connect** for your provider (iCloud, Google Drive, OneDrive, Dropbox)
+3. Authenticate via OAuth popup
+4. Click **Sync** to scan and import clips
+
+Cloud clips stream directly from the provider — no additional storage needed.
 
 ### Environment Variables
 
-- `DATA_PATH`: Base path for dashcam footage (default: `/share`)
-- `HOST`: Host to bind to (default: `0.0.0.0`)
-- `PORT`: Port to bind to (default: `8000`)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATA_PATH` | `/data` | Base path for dashcam footage |
+| `SHARE_PATH` | `/data` | Legacy mount path |
+| `STATIC_PATH` | `/app/backend/static` | Frontend build output |
 
 ### Development
 
