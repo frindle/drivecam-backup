@@ -24,8 +24,15 @@ FROM base AS production
 COPY --from=frontend /src/frontend/dist ./backend/static/
 COPY backend/ ./backend/
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libkrb5-dev gcc g++ python3-dev \
+    software-properties-common \
+    && add-apt-repository --yes universe \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    build-essential libkrb5-dev \
+    python3.11-dev python3-pip \
     && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
+    && ln -sf /usr/bin/pip3 /usr/local/bin/pip \
     && pip install --no-cache-dir --break-system-packages \
         fastapi==0.109.2 \
         "uvicorn[standard]==0.27.1" \
