@@ -33,8 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && pip install --no-cache-dir --upgrade pip
 
 RUN pip install --no-cache-dir --break-system-packages \
-    fastapi==0.109.2 "uvicorn[standard]==0.27.1"
-        python-multipart pydantic==2.6.1
+    fastapi==0.109.2 "uvicorn[standard]==0.27.1" python-multipart pydantic==2.6.1
 
 RUN pip install --no-cache-dir --break-system-packages \
     smbprotocol>=1.12.0
