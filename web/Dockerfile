@@ -2,12 +2,7 @@
 # Run:   docker compose up
 # Requires nvidia-container-toolkit on the host and "nvidia" runtime configured
 
-FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04 AS base
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 python3-pip ffmpeg curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && ln -s /usr/bin/python3.11 /usr/local/bin/python \
-    && ln -s /usr/bin/pip3 /usr/local/bin/pip
+FROM ubuntu:22.04 AS base
 
 WORKDIR /app
 
@@ -23,20 +18,23 @@ RUN npm run build
 FROM base AS production
 COPY --from=frontend /src/frontend/dist ./backend/static/
 COPY backend/ ./backend/
+
+# Install system deps — Ubuntu universe + NVIDIA CUDA repo
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    software-properties-common \
-    && add-apt-repository --yes universe \
+    curl ca-certificates gnupg \
+    && curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/3c0b14b9f0e83e28d2c6c67c82fd9e019a5e23f8c6dd3a2b24cc2f0500034a0b-nvidia-repo.pub | apt-key add - \
+    && echo "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/ /" > /etc/apt/sources.list.d/cuda.list \
+    && echo "deb http://archive.ubuntu.com/ubuntu jammy universe" >> /etc/apt/sources.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-    build-essential libkrb5-dev \
-    python3.11-dev python3-pip \
+    build-essential libkrb5-dev python3-dev python3-pip \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
-    && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
-    && ln -sf /usr/bin/pip3 /usr/local/bin/pip \
-    && pip install --no-cache-dir --break-system-packages \
-        fastapi==0.109.2 \
-        "uvicorn[standard]==0.27.1" \
-        pydantic==2.6.1
+    && ln -sf /usr/bin/python3.10 /usr/local/bin/python \
+    && ln -sf /usr/bin/pip3 /usr/local/bin/pip
+
+RUN pip install --no-cache-dir --break-system-packages \
+    fastapi==0.109.2 "uvicorn[standard]==0.27.1" pydantic==2.6.1
 
 RUN pip install --no-cache-dir --break-system-packages \
     smbprotocol>=1.12.0
@@ -45,8 +43,7 @@ RUN pip install --no-cache-dir --break-system-packages \
     pyicloud>=1.14.0
 
 RUN pip install --no-cache-dir --break-system-packages \
-    google-api-python-client>=2.100.0 \
-    google-auth-oauthlib>=1.0.0
+    google-api-python-client>=2.100.0 google-auth-oauthlib>=1.0.0
 
 RUN pip install --no-cache-dir --break-system-packages \
     msgraph-sdk>=1.0.0
