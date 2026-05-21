@@ -241,10 +241,10 @@ def _check_nvenc() -> bool:
         return False
     try:
         result = subprocess.run(
-            [ffmpeg, '-f', 'lavfi', '-i', 'nullsrc=s=64x64:r=1', '-t', '1', '-c:v', 'hevc_nvenc', '-f', 'null', '-'],
-            capture_output=True, timeout=15,
+            [ffmpeg, '-hide_banner', '-encoders'],
+            capture_output=True, text=True, timeout=10,
         )
-        _nvenc_available = result.returncode == 0
+        _nvenc_available = 'hevc_nvenc' in result.stdout
     except Exception:
         _nvenc_available = False
     print(f"GPU re-encoding (hevc_nvenc): {'available' if _nvenc_available else 'not available, using libx265'}")
