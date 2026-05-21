@@ -133,20 +133,9 @@ def _strip_camera_suffix(stem: str) -> str:
     return stem
 
 
-_CHUNK_SUFFIX_RE = re.compile(r'_(\d{3,})$')
-
-
-def _parse_chunk_number(filename: str) -> Optional[str]:
-    stem = Path(filename).stem
-    m = _CHUNK_SUFFIX_RE.search(stem)
-    return m.group(1) if m else None
-
-
 def _event_key(vehicle: VehicleType, timestamp: Optional[datetime], filename: str = "") -> Optional[str]:
     if timestamp:
-        base = f"{vehicle.value}:{timestamp.strftime('%Y-%m-%d_%H-%M-%S')}"
-        chunk = _parse_chunk_number(filename) if filename else None
-        return f"{base}:{chunk}" if chunk else base
+        return f"{vehicle.value}:{timestamp.strftime('%Y-%m-%d_%H-%M-%S')}"
     if filename:
         stem = Path(filename).stem
         prefix = _strip_camera_suffix(stem)

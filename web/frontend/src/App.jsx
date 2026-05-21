@@ -1099,10 +1099,12 @@ function EventCard({ event, onClick }) {
   )
 }
 
+const ANGLE_ORDER = ['front', 'back', 'left', 'right', 'cabin', 'unknown']
+
 function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
   const videosRef = useRef({})
   const [multiCam, setMultiCam] = useState(false)
-  const [activeCamera, setActiveCamera] = useState(event.clips?.[0]?.cameraAngle || 'front')
+  const [chunkIdx, setChunkIdx] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [selectedClips, setSelectedClips] = useState(new Set())
@@ -1112,14 +1114,57 @@ function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
   const hasNext = currentIdx < allEvents.length - 1
   const color = EVENT_COLORS[event.eventType] || EVENT_COLORS.unknown
 
+  const clips = event.clips || []
+
+  // Group clips by camera angle, sorted by filename to preserve chunk order (_001, _002…)
+  const clipsByAngle = useMemo(() => {
+    const groups = {}
+    for (const clip of clips) {
+      const a = clip.cameraAngle
+      if (!groups[a]) groups[a] = []
+      groups[a].push(clip)
+    }
+    for (const a of Object.keys(groups)) {
+      groups[a].sort((x, y) => x.filename.localeCompare(y.filename))
+    }
+    return groups
+  }, [clips])
+
+  const uniqueAngles = ANGLE_ORDER.filter(a => clipsByAngle[a])
+  const [activeCamera, setActiveCamera] = useState(() => uniqueAngles[0] || 'front')
+
+  const activeClips = clipsByAngle[activeCamera] || []
+  const totalChunks = activeClips.length
+  const activeClip = activeClips[chunkIdx] || activeClips[0]
+
+  // Reset state when navigating to a different event
+  useEffect(() => {
+    setChunkIdx(0)
+    setActiveCamera(uniqueAngles[0] || 'front')
+    setPlaying(false)
+    setSelectMode(false)
+    setSelectedClips(new Set())
+  }, [event.eventKey])
+
+  function syncAll(time) {
+    for (const ref of Object.values(videosRef.current)) {
+      if (ref && Math.abs(ref.currentTime - time) > 0.5) ref.currentTime = time
+    }
+  }
+
+  function handleTimeUpdate() {
+    if (multiCam) {
+      const first = Object.values(videosRef.current)[0]
+      if (first) syncAll(first.currentTime)
+    }
+  }
+
   const handleDeleteSelected = async () => {
     if (selectedClips.size === 0) return
     if (!confirm(`Delete ${selectedClips.size} clip(s)?`)) return
     setDeleting(true)
     try {
-      for (const clipId of selectedClips) {
-        await deleteClip(clipId)
-      }
+      for (const clipId of selectedClips) await deleteClip(clipId)
       onDeleted()
     } catch (e) {
       alert('Delete failed: ' + e.message)
@@ -1141,64 +1186,6 @@ function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
     }
   }
 
-  const clips = event.clips || []
-  const sortedClips = [...clips].sort((a, b) => {
-    const order = ['front', 'back', 'left', 'right', 'cabin']
-    return order.indexOf(a.cameraAngle) - order.indexOf(b.cameraAngle)
-  })
-  const activeClip = clips.find(c => c.cameraAngle === activeCamera) || clips[0]
-
-  useEffect(() => {
-    setPlaying(false)
-    if (!multiCam) {
-      const v = videosRef.current[activeClip?.id]
-      if (v) {
-        v.currentTime = 0
-        v.load()
-      }
-    }
-  }, [event, activeCamera, multiCam])
-
-  function syncAll(time) {
-    for (const ref of Object.values(videosRef.current)) {
-      if (ref && Math.abs(ref.currentTime - time) > 0.5) {
-        ref.currentTime = time
-      }
-    }
-  }
-
-  function handleMainPlay() {
-    if (multiCam) {
-      const first = Object.values(videosRef.current)[0]
-      if (first) {
-        first.play()
-        setPlaying(true)
-      }
-    } else {
-      const v = videosRef.current[activeClip?.id]
-      if (v) { v.play(); setPlaying(true) }
-    }
-  }
-
-  function handleMainPause() {
-    if (multiCam) {
-      for (const v of Object.values(videosRef.current)) {
-        if (v) v.pause()
-      }
-    } else {
-      const v = videosRef.current[activeClip?.id]
-      if (v) v.pause()
-    }
-    setPlaying(false)
-  }
-
-  function handleTimeUpdate() {
-    if (multiCam) {
-      const first = Object.values(videosRef.current)[0]
-      if (first) syncAll(first.currentTime)
-    }
-  }
-
   return (
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal-content event-detail">
@@ -1215,27 +1202,15 @@ function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
             </button>
             {selectMode ? (
               <>
-                <button
-                  className="btn btn-danger"
-                  onClick={handleDeleteSelected}
-                  disabled={deleting || selectedClips.size === 0}
-                  title="Delete selected clips"
-                >
+                <button className="btn btn-danger" onClick={handleDeleteSelected} disabled={deleting || selectedClips.size === 0}>
                   {deleting ? '⏳' : '🗑️'} {selectedClips.size > 0 ? `Delete (${selectedClips.size})` : 'Select clips'}
                 </button>
                 <button className="btn btn-clear" onClick={() => { setSelectMode(false); setSelectedClips(new Set()) }}>Cancel</button>
               </>
             ) : (
               <>
-                <button className="btn btn-share-action" onClick={() => setSelectMode(true)} title="Select clips to delete">
-                  ☑️ Select
-                </button>
-                <button
-                  className="btn btn-danger"
-                  onClick={handleDeleteEvent}
-                  disabled={deleting}
-                  title="Delete all clips in this event"
-                >
+                <button className="btn btn-share-action" onClick={() => setSelectMode(true)}>☑️ Select</button>
+                <button className="btn btn-danger" onClick={handleDeleteEvent} disabled={deleting}>
                   {deleting ? '⏳' : '🗑️'} Delete All
                 </button>
               </>
@@ -1245,69 +1220,92 @@ function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
         </div>
 
         <div className="event-detail-body">
-        {multiCam ? (
-          <div className="multicam-grid">
-            {sortedClips.map(clip => (
-              <div key={clip.id} className="multicam-pane">
-                <video
-                  ref={el => { if (el) videosRef.current[clip.id] = el }}
-                  src={clip.downloadUrl}
-                  controls={false}
-                  muted
-                  onTimeUpdate={handleTimeUpdate}
-                  onPlay={() => setPlaying(true)}
-                  onPause={() => setPlaying(false)}
-                  onClick={e => {
-                    if (e.target.paused) e.target.play()
-                    else e.target.pause()
-                  }}
-                />
-                <div className="multicam-label">{CAMERA_LABELS[clip.cameraAngle] || clip.cameraAngle}</div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="modal-video-wrap">
-            <video
-              ref={el => { if (el && activeClip) videosRef.current[activeClip.id] = el }}
-              key={activeClip?.id}
-              src={activeClip?.downloadUrl}
-              controls
-              autoPlay
-              onPlay={() => setPlaying(true)}
-              onPause={() => setPlaying(false)}
-              onClick={() => playing ? handleMainPause() : handleMainPlay()}
-            />
-          </div>
-        )}
+          {multiCam ? (
+            <div className="multicam-grid">
+              {uniqueAngles.map(angle => {
+                const angleClips = clipsByAngle[angle]
+                const clip = angleClips[Math.min(chunkIdx, angleClips.length - 1)]
+                return (
+                  <div key={angle} className="multicam-pane">
+                    <video
+                      key={clip.id}
+                      ref={el => { if (el) videosRef.current[angle] = el }}
+                      src={clip.downloadUrl}
+                      controls={false}
+                      muted
+                      onTimeUpdate={handleTimeUpdate}
+                      onPlay={() => setPlaying(true)}
+                      onPause={() => setPlaying(false)}
+                      onEnded={() => {
+                        if (angle === uniqueAngles[0] && chunkIdx < totalChunks - 1) {
+                          setChunkIdx(i => i + 1)
+                        }
+                      }}
+                      onClick={e => { e.target.paused ? e.target.play() : e.target.pause() }}
+                    />
+                    <div className="multicam-label">{CAMERA_LABELS[angle] || angle}</div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="modal-video-wrap">
+              <video
+                key={activeClip?.id}
+                ref={el => { if (el && activeClip) videosRef.current['single'] = el }}
+                src={activeClip?.downloadUrl}
+                controls
+                autoPlay
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onEnded={() => {
+                  if (chunkIdx < totalChunks - 1) setChunkIdx(i => i + 1)
+                }}
+              />
+            </div>
+          )}
 
-        <div className="modal-meta">
-          <div className="camera-tabs">
-            {sortedClips.map(clip => (
-              <button
-                key={clip.id}
-                className={`camera-tab ${activeCamera === clip.cameraAngle && !selectMode ? 'active' : ''} ${selectMode && selectedClips.has(clip.id) ? 'selected' : ''}`}
-                onClick={() => {
-                  if (selectMode) {
-                    setSelectedClips(prev => {
+          <div className="modal-meta">
+            <div className="camera-tabs">
+              {selectMode ? (
+                clips.sort((a, b) => a.filename.localeCompare(b.filename)).map(clip => (
+                  <button
+                    key={clip.id}
+                    className={`camera-tab ${selectedClips.has(clip.id) ? 'selected' : ''}`}
+                    onClick={() => setSelectedClips(prev => {
                       const next = new Set(prev)
                       next.has(clip.id) ? next.delete(clip.id) : next.add(clip.id)
                       return next
-                    })
-                  } else {
-                    setActiveCamera(clip.cameraAngle)
-                  }
-                }}
-              >
-                {selectMode && selectedClips.has(clip.id) ? '✓ ' : ''}{CAMERA_LABELS[clip.cameraAngle] || clip.cameraAngle}
-              </button>
-            ))}
+                    })}
+                  >
+                    {selectedClips.has(clip.id) ? '✓ ' : ''}{CAMERA_LABELS[clip.cameraAngle] || clip.cameraAngle}
+                    {totalChunks > 1 && ` ${clips.indexOf(clip) + 1}`}
+                  </button>
+                ))
+              ) : (
+                uniqueAngles.map(angle => (
+                  <button
+                    key={angle}
+                    className={`camera-tab ${activeCamera === angle ? 'active' : ''}`}
+                    onClick={() => { setActiveCamera(angle); setChunkIdx(0) }}
+                  >
+                    {CAMERA_LABELS[angle] || angle}
+                  </button>
+                ))
+              )}
+              {!selectMode && totalChunks > 1 && (
+                <span className="chunk-nav">
+                  <button className="btn btn-nav" onClick={() => setChunkIdx(i => Math.max(0, i - 1))} disabled={chunkIdx === 0}>◀</button>
+                  <span className="chunk-label">{chunkIdx + 1}/{totalChunks}</span>
+                  <button className="btn btn-nav" onClick={() => setChunkIdx(i => Math.min(totalChunks - 1, i + 1))} disabled={chunkIdx === totalChunks - 1}>▶</button>
+                </span>
+              )}
+            </div>
+            <div className="modal-meta-item"><span className="meta-label">Time</span><span className="meta-value">{formatDate(event.timestamp)} {formatTime(event.timestamp)}</span></div>
+            <div className="modal-meta-item"><span className="meta-label">Cameras</span><span className="meta-value">{event.cameraCount}</span></div>
+            <div className="modal-meta-item"><span className="meta-label">Folder</span><span className="meta-value">{event.folder}</span></div>
+            <div className="modal-meta-item"><span className="meta-label">Size</span><span className="meta-value">{event.sizeString}</span></div>
           </div>
-          <div className="modal-meta-item"><span className="meta-label">Time</span><span className="meta-value">{formatDate(event.timestamp)} {formatTime(event.timestamp)}</span></div>
-          <div className="modal-meta-item"><span className="meta-label">Cameras</span><span className="meta-value">{event.cameraCount}</span></div>
-          <div className="modal-meta-item"><span className="meta-label">Folder</span><span className="meta-value">{event.folder}</span></div>
-          <div className="modal-meta-item"><span className="meta-label">Size</span><span className="meta-value">{event.sizeString}</span></div>
-        </div>
         </div>
       </div>
     </div>

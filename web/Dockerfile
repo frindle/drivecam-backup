@@ -19,18 +19,29 @@ FROM base AS production
 COPY --from=frontend /src/frontend/dist ./backend/static/
 COPY backend/ ./backend/
 
-# Install system deps — Ubuntu universe (no CUDA needed at build time, runtime injects GPU via nvidia-container-toolkit)
+# Install system deps — Ubuntu universe
+# ffmpeg is NOT installed from apt (Ubuntu's build lacks NVENC/CUDA support).
+# We use a static BtbN build below which is compiled against CUDA stubs;
+# hevc_nvenc resolves at runtime via the NVIDIA Container Toolkit driver injection.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     && add-apt-repository --yes universe \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
     build-essential libkrb5-dev python3-dev python3-pip \
-    ffmpeg \
+    curl xz-utils \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3.10 /usr/local/bin/python \
     && ln -sf /usr/bin/pip3 /usr/local/bin/pip \
     && pip install --no-cache-dir --upgrade pip
+
+# Static ffmpeg + ffprobe with NVENC/CUDA support (BtbN GPL build)
+RUN curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz" \
+      -o /tmp/ffmpeg.tar.xz \
+    && mkdir -p /tmp/ffmpeg \
+    && tar xf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1 \
+    && mv /tmp/ffmpeg/bin/ffmpeg /tmp/ffmpeg/bin/ffprobe /usr/local/bin/ \
+    && rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz
 
 RUN pip install --no-cache-dir --break-system-packages \
     fastapi==0.109.2 "uvicorn[standard]==0.27.1" python-multipart pydantic==2.6.1

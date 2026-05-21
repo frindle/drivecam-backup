@@ -189,15 +189,25 @@ def get_events(
         clips_in_event.sort(key=lambda c: c.timestamp or MIN_TIMESTAMP, reverse=True)
         ts = clips_in_event[0].timestamp
         first = clips_in_event[0]
-        dur = next((c.duration for c in clips_in_event if c.duration is not None), None)
+        unique_angles = sorted(set(c.cameraAngle.value for c in clips_in_event))
+        # Sum durations for one camera angle to get total recording length across chunks
+        angle_order = ['front', 'back', 'left', 'right', 'cabin', 'unknown']
+        dur = None
+        for angle in angle_order:
+            angle_clips = [c for c in clips_in_event if c.cameraAngle.value == angle]
+            if angle_clips:
+                durs = [c.duration for c in angle_clips if c.duration is not None]
+                if durs:
+                    dur = sum(durs)
+                break
         events.append({
             "eventKey": event_key,
             "timestamp": ts,
             "vehicle": first.vehicle,
             "eventType": first.eventType,
             "folder": first.folder,
-            "cameraAngles": sorted(set(c.cameraAngle.value for c in clips_in_event)),
-            "cameraCount": len(clips_in_event),
+            "cameraAngles": unique_angles,
+            "cameraCount": len(unique_angles),
             "totalSize": sum(c.size for c in clips_in_event),
             "sizeString": byte_count_fmt(sum(c.size for c in clips_in_event)),
             "durationSeconds": dur,
