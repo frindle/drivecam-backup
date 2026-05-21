@@ -96,28 +96,20 @@ function byteCountFmt(bytes) {
 
 function StorageCalculator({ stats }) {
   if (!stats) return null
-  if (!stats.total_clips) {
-    return (
-      <div className="storage-calculator">
-        <span className="storage-label">No footage yet — import an SD card to get started.</span>
-      </div>
-    )
-  }
 
   const bytesPerHour = stats.bytes_per_recording_hour
-  if (!bytesPerHour || bytesPerHour === 0) return null
-
   const GB = 1024 ** 3
   const sizes = [
-    { label: '256 GB', gb: 256 },
-    { label: '512 GB', gb: 512 },
-    { label: '1 TB', gb: 1024 },
-    { label: '2 TB', gb: 2048 },
+    { label: '256GB', gb: 256 },
+    { label: '512GB', gb: 512 },
+    { label: '1TB', gb: 1024 },
+    { label: '2TB', gb: 2048 },
   ]
 
+  if (!stats.total_clips || !bytesPerHour) return null
+
   return (
-    <div className="storage-calculator">
-      <span className="storage-label">SD card capacity:</span>
+    <>
       {sizes.map(({ label, gb }) => {
         const hours = (gb * GB) / bytesPerHour
         const days = hours / 24
@@ -127,12 +119,12 @@ function StorageCalculator({ stats }) {
             ? `${hours.toFixed(1)}h`
             : `${days.toFixed(1)}d`
         return (
-          <span key={label} className="storage-estimate" title={`~${hours.toFixed(1)}h of recording`}>
-            {label}: <strong>{display}</strong>
+          <span key={label} className="header-cap-chip" title={`${label} card holds ~${hours.toFixed(1)}h of loop recording`}>
+            {label}·<strong>{display}</strong>
           </span>
         )
       })}
-    </div>
+    </>
   )
 }
 
@@ -911,6 +903,7 @@ export default function App() {
           <button className="btn btn-icon" onClick={() => setShowImport(true)} title="Import from SD Card">
             📤
           </button>
+          {storageStats && <div className="header-capacity"><StorageCalculator stats={storageStats} /></div>}
           <span className="clip-count">{eventCount} events{hasMore ? '+' : ''}</span>
           {gearGuardCount > 0 && (
             <span className="badge gear-guard">{gearGuardCount} Gear Guard</span>
@@ -920,8 +913,6 @@ export default function App() {
           </button>
         </div>
       </header>
-
-      <StorageCalculator stats={storageStats} />
 
       <div className="filter-bar">
         <div className="filter-row">
@@ -1285,18 +1276,23 @@ function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
 
 function GeneralPanel({ onSettingsChange }) {
   const [settings, setSettings] = useState(null)
+  const [health, setHealth] = useState(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSavedFlag] = useState(false)
 
   useEffect(() => {
     getAppSettings().then(setSettings).catch(() => {})
+    getHealth().then(setHealth).catch(() => {})
   }, [])
 
   const handleSave = async () => {
     if (!settings) return
     setSaving(true)
     try {
-      const updated = await updateAppSettings({ app_name: settings.app_name })
+      const updated = await updateAppSettings({
+        app_name: settings.app_name,
+        reencode_enabled: settings.reencode_enabled,
+      })
       setSettings(updated)
       setSavedFlag(true)
       setTimeout(() => setSavedFlag(false), 2000)
@@ -1306,6 +1302,9 @@ function GeneralPanel({ onSettingsChange }) {
   }
 
   if (!settings) return <div className="retention-body"><div className="spinner small" /></div>
+
+  const reencodeOn = settings.reencode_enabled === 'true'
+  const gpuOk = health?.gpuAvailable
 
   return (
     <div className="retention-body">
@@ -1323,6 +1322,27 @@ function GeneralPanel({ onSettingsChange }) {
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
           {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save'}
         </button>
+      </div>
+
+      <div className="general-section">
+        <h3 className="general-section-title">Storage Optimisation</h3>
+        <div className="general-row">
+          <label className="general-label">Re-encode to H.265</label>
+          <label className="toggle-label">
+            <input
+              type="checkbox"
+              checked={reencodeOn}
+              onChange={e => setSettings(s => ({ ...s, reencode_enabled: e.target.checked ? 'true' : 'false' }))}
+            />
+            <span className="toggle-track" />
+          </label>
+        </div>
+        <p className="general-path-hint">
+          When enabled, footage older than 14 days is re-encoded to H.265 after each import — typically saving 40–50% storage.
+          {' '}{gpuOk === true && <span className="gpu-badge">GPU ✓</span>}
+          {gpuOk === false && <span className="gpu-badge no-gpu">CPU only</span>}
+          {' '}Re-encoding replaces the original file.
+        </p>
       </div>
 
       <div className="general-section">

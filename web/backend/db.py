@@ -86,6 +86,12 @@ def _get_conn():
             updated_at  TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS reencoded_clips (
+            clip_id     TEXT PRIMARY KEY,
+            attempted_at TEXT NOT NULL
+        )
+    """)
     try:
         yield conn
     finally:
@@ -596,6 +602,38 @@ def delete_retention(vehicle_folder: str) -> bool:
         return cur.rowcount > 0
 
 
+def update_clip_duration(clip_id: str, duration: float) -> None:
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE clips SET data = json_set(data, '$.duration', ?) WHERE id = ?",
+            (duration, clip_id),
+        )
+
+
+def update_clip_size(clip_id: str, size: int) -> None:
+    size_str = byte_count_fmt(size)
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE clips SET data = json_set(json_set(data, '$.size', ?), '$.sizeString', ?) WHERE id = ?",
+            (size, size_str, clip_id),
+        )
+
+
+def mark_reencoded(clip_id: str) -> None:
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO reencoded_clips (clip_id, attempted_at) VALUES (?, ?)",
+            (clip_id, now),
+        )
+
+
+def get_reencoded_ids() -> set:
+    with _get_conn() as conn:
+        rows = conn.execute("SELECT clip_id FROM reencoded_clips").fetchall()
+    return {r[0] for r in rows}
+
+
 def delete_clip_from_db(clip_id: str) -> bool:
     with _get_conn() as conn:
         cur = conn.execute("DELETE FROM clips WHERE id = ?", (clip_id,))
@@ -615,6 +653,7 @@ def delete_clips_by_event_key(event_key: str) -> int:
 
 SETTING_DEFAULTS = {
     "app_name": "DriveCam",
+    "reencode_enabled": "false",
 }
 
 

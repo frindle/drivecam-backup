@@ -97,6 +97,7 @@ class HealthResponse(BaseModel):
     sharePath: str
     clipsInCache: int
     ffmpegAvailable: bool
+    gpuAvailable: bool = False
 
 
 class RemoteShareBase(BaseModel):

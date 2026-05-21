@@ -39,6 +39,10 @@ from .db import (
     filter_already_imported,
     mark_clips_imported,
     update_imported_clip_paths,
+    update_clip_duration,
+    update_clip_size,
+    mark_reencoded,
+    get_reencoded_ids,
     delete_clip_from_db,
     delete_clips_by_event_key,
     get_retention_settings,
@@ -220,6 +224,132 @@ def _ingest_watcher():
             print(f"Ingest watcher error: {e}")
 
 
+_nvenc_available: Optional[bool] = None
+_reencoding = False
+
+
+def _check_nvenc() -> bool:
+    global _nvenc_available
+    if _nvenc_available is not None:
+        return _nvenc_available
+    if not _use_cuda():
+        _nvenc_available = False
+        return False
+    ffmpeg = _check_ffmpeg()
+    if not ffmpeg:
+        _nvenc_available = False
+        return False
+    try:
+        result = subprocess.run(
+            [ffmpeg, '-f', 'lavfi', '-i', 'nullsrc=s=64x64:r=1', '-t', '1', '-c:v', 'hevc_nvenc', '-f', 'null', '-'],
+            capture_output=True, timeout=15,
+        )
+        _nvenc_available = result.returncode == 0
+    except Exception:
+        _nvenc_available = False
+    print(f"GPU re-encoding (hevc_nvenc): {'available' if _nvenc_available else 'not available, using libx265'}")
+    return _nvenc_available
+
+
+def _reencode_clip(file_path: str, encoder: str) -> Optional[int]:
+    """Re-encode a clip to H.265. Returns new file size on success, None on failure."""
+    ffmpeg = _check_ffmpeg()
+    if not ffmpeg:
+        return None
+    path = Path(file_path)
+    if not path.exists():
+        return None
+    tmp_path = path.with_suffix('.tmp265.mp4')
+    try:
+        codec_args = (
+            ['-c:v', 'hevc_nvenc', '-preset', 'p4', '-cq', '28']
+            if encoder == 'hevc_nvenc'
+            else ['-c:v', 'libx265', '-preset', 'medium', '-crf', '28']
+        )
+        result = subprocess.run(
+            [ffmpeg, '-i', str(path), *codec_args, '-c:a', 'copy', '-movflags', '+faststart', '-y', str(tmp_path)],
+            capture_output=True, timeout=600,
+        )
+        if result.returncode != 0 or not tmp_path.exists():
+            return None
+        new_size = tmp_path.stat().st_size
+        if new_size >= path.stat().st_size:
+            tmp_path.unlink()
+            return None
+        tmp_path.replace(path)
+        return new_size
+    except Exception as e:
+        print(f"Re-encode error {path}: {e}")
+        return None
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+
+def _reencode_old_clips_bg() -> None:
+    """Background: re-encode local clips older than 14 days to H.265."""
+    global _reencoding
+    settings = get_settings()
+    if settings.get('reencode_enabled', 'false').lower() != 'true':
+        return
+    if _reencoding:
+        return
+    _reencoding = True
+    try:
+        encoder = 'hevc_nvenc' if _check_nvenc() else 'libx265'
+        cutoff = datetime.utcnow() - timedelta(days=14)
+        clips, _, _ = get_all_clips(limit=100000)
+        reencoded_ids = get_reencoded_ids()
+        pending = [
+            c for c in clips
+            if c.source in (None, 'local')
+            and c.id not in reencoded_ids
+            and c.timestamp is not None
+            and c.timestamp < cutoff
+        ]
+        if not pending:
+            return
+        print(f"Re-encode: {len(pending)} clips eligible (>{14}d old), encoder={encoder}")
+        done = saved_bytes = 0
+        for clip in pending:
+            for base in DATA_PATHS:
+                full = os.path.join(base, clip.relativePath)
+                if os.path.exists(full):
+                    orig_size = os.path.getsize(full)
+                    new_size = _reencode_clip(full, encoder)
+                    if new_size is not None:
+                        saved_bytes += orig_size - new_size
+                        update_clip_size(clip.id, new_size)
+                    mark_reencoded(clip.id)
+                    done += 1
+                    break
+        print(f"Re-encode: complete — {done} clips processed, {byte_count_fmt(saved_bytes)} saved")
+    finally:
+        _reencoding = False
+
+
+def _enrich_durations_bg() -> None:
+    """Background: run ffprobe on local clips missing duration and persist to DB."""
+    if not ffmpeg_available():
+        return
+    clips, _, _ = get_all_clips(limit=100000)
+    pending = [c for c in clips if c.source in (None, "local") and c.duration is None]
+    if not pending:
+        return
+    print(f"Duration enrichment: processing {len(pending)} clips")
+    updated = 0
+    for clip in pending:
+        for base in DATA_PATHS:
+            full = os.path.join(base, clip.relativePath)
+            if os.path.exists(full):
+                duration = get_duration(full)
+                if duration is not None:
+                    update_clip_duration(clip.id, duration)
+                    updated += 1
+                break
+    print(f"Duration enrichment: updated {updated} clips")
+
+
 def _refresh_cache_locked() -> None:
     global _is_scanning, _last_scan_at
     try:
@@ -240,6 +370,8 @@ def _refresh_cache_locked() -> None:
         upsert_clips(clips)
         set_cached_at(datetime.utcnow())
         _create_ingest_subfolders()
+        threading.Thread(target=_enrich_durations_bg, daemon=True).start()
+        threading.Thread(target=_reencode_old_clips_bg, daemon=True).start()
     finally:
         _is_scanning = False
 
@@ -264,6 +396,7 @@ def health():
         sharePath=", ".join(DATA_PATHS),
         clipsInCache=get_clip_count(),
         ffmpegAvailable=ffmpeg_available(),
+        gpuAvailable=_check_nvenc(),
     )
 
 
@@ -1036,28 +1169,35 @@ def storage_stats():
         hours_of_footage = span_h
         clips_per_hour = len(clips) / span_h if span_h > 0 else 0
 
-    # Cluster clips by drive session (gap > 5 min = new session) to get
-    # actual recording hours, then derive bytes per recording hour.
-    SESSION_GAP_SECS = 300
     recording_hours = 0.0
     bytes_per_recording_hour = 0.0
-    ts_size_pairs = sorted(
-        [(c.timestamp, c.size) for c in clips if c.timestamp],
-        key=lambda x: x[0],
-    )
-    if ts_size_pairs:
-        session_start = ts_size_pairs[0][0]
-        session_end = ts_size_pairs[0][0]
-        for ts, _ in ts_size_pairs[1:]:
-            if (ts - session_end).total_seconds() <= SESSION_GAP_SECS:
-                session_end = ts
-            else:
-                recording_hours += max((session_end - session_start).total_seconds() / 3600, 1 / 60)
-                session_start = ts
-                session_end = ts
-        recording_hours += max((session_end - session_start).total_seconds() / 3600, 1 / 60)
-        if recording_hours > 0:
-            bytes_per_recording_hour = total_size / recording_hours
+    clips_with_dur = [c for c in clips if c.duration is not None]
+    if clips_with_dur:
+        total_dur_secs = sum(c.duration for c in clips_with_dur)
+        total_size_with_dur = sum(c.size for c in clips_with_dur)
+        recording_hours = total_dur_secs / 3600
+        if total_dur_secs > 0:
+            bytes_per_recording_hour = total_size_with_dur / total_dur_secs * 3600
+    else:
+        # Fall back to session clustering until ffprobe enrichment completes
+        SESSION_GAP_SECS = 300
+        ts_size_pairs = sorted(
+            [(c.timestamp, c.size) for c in clips if c.timestamp],
+            key=lambda x: x[0],
+        )
+        if ts_size_pairs:
+            session_start = ts_size_pairs[0][0]
+            session_end = ts_size_pairs[0][0]
+            for ts, _ in ts_size_pairs[1:]:
+                if (ts - session_end).total_seconds() <= SESSION_GAP_SECS:
+                    session_end = ts
+                else:
+                    recording_hours += max((session_end - session_start).total_seconds() / 3600, 1 / 60)
+                    session_start = ts
+                    session_end = ts
+            recording_hours += max((session_end - session_start).total_seconds() / 3600, 1 / 60)
+            if recording_hours > 0:
+                bytes_per_recording_hour = total_size / recording_hours
 
     vehicle_info = {v: {"clips": d["clips"], "size": d["size"]} for v, d in by_vehicle.items()}
 
