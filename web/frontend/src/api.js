@@ -175,6 +175,12 @@ export async function getVehicleLabels() {
   return apiFetch('/vehicles');
 }
 
+export async function deleteVehicle(folder) {
+  const res = await fetch(`${BASE}/vehicles/${encodeURIComponent(folder)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
 export async function reassignVehicle(fromFolder, toFolder) {
   const res = await fetch(`${BASE}/vehicles/reassign`, {
     method: 'POST',

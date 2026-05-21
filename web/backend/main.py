@@ -41,6 +41,7 @@ from .db import (
     update_imported_clip_paths,
     update_clip_duration,
     update_clip_size,
+    delete_vehicle_clips,
     mark_reencoded,
     get_reencoded_ids,
     delete_clip_from_db,
@@ -1297,6 +1298,31 @@ def reassign_vehicle(body: ReassignRequest):
         update_imported_clip_paths(moved)
     trigger_scan()
     return {"moved": len(moved), "errors": errors}
+
+
+@app.delete("/api/vehicles/{folder:path}")
+def delete_vehicle(folder: str):
+    folder = folder.strip("/")
+    if ".." in folder or not folder:
+        raise HTTPException(status_code=400, detail="Invalid folder name")
+    folder_path = None
+    for base in DATA_PATHS:
+        candidate = Path(base) / folder
+        if candidate.parent == Path(base) and candidate.exists():
+            folder_path = candidate
+            break
+    clips, _, _ = get_all_clips(limit=100000)
+    vehicle_clips = [c for c in clips if c.relativePath.startswith(folder + "/") and c.source in (None, "local")]
+    clips_count = len(vehicle_clips)
+    bytes_freed = sum(c.size for c in vehicle_clips)
+    delete_vehicle_clips(folder)
+    if folder_path and folder_path.exists():
+        shutil.rmtree(str(folder_path), ignore_errors=True)
+    return {
+        "clips_deleted": clips_count,
+        "bytes_freed": bytes_freed,
+        "bytes_freed_string": byte_count_fmt(bytes_freed),
+    }
 
 
 @app.get("/api/vehicles/folders")

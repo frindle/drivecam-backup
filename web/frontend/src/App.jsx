@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { getEvents, getClips, getHealth, triggerScan, clearCache, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, checkImported, getStorageStats, getVehicleLabels, reassignVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus, getAppSettings, updateAppSettings } from './api'
+import { getEvents, getClips, getHealth, triggerScan, clearCache, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, checkImported, getStorageStats, getVehicleLabels, reassignVehicle, deleteVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus, getAppSettings, updateAppSettings } from './api'
 
 const EVENT_COLORS = {
   driving: '#3b82f6',
@@ -1279,11 +1279,31 @@ function GeneralPanel({ onSettingsChange }) {
   const [health, setHealth] = useState(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSavedFlag] = useState(false)
+  const [vehicles, setVehicles] = useState([])
+  const [confirmDelete, setConfirmDelete] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const loadVehicles = () => getVehicleLabels().then(d => setVehicles(d.folders || [])).catch(() => {})
 
   useEffect(() => {
     getAppSettings().then(setSettings).catch(() => {})
     getHealth().then(setHealth).catch(() => {})
+    loadVehicles()
   }, [])
+
+  const handleDeleteVehicle = async () => {
+    if (!confirmDelete) return
+    setDeleting(true)
+    try {
+      await deleteVehicle(confirmDelete)
+      setConfirmDelete(null)
+      loadVehicles()
+      if (onSettingsChange) onSettingsChange()
+    } catch (e) {
+      alert(`Failed to delete: ${e.message}`)
+    }
+    setDeleting(false)
+  }
 
   const handleSave = async () => {
     if (!settings) return
@@ -1344,6 +1364,34 @@ function GeneralPanel({ onSettingsChange }) {
           {' '}Re-encoding replaces the original file.
         </p>
       </div>
+
+      <div className="general-section">
+        <h3 className="general-section-title">Vehicles</h3>
+        {vehicles.length === 0 && <p className="general-path-hint">No vehicles found.</p>}
+        {vehicles.map(folder => (
+          <div key={folder} className="general-row">
+            <span className="general-label" style={{ width: 'auto', flex: 1 }}>{folder}</span>
+            <button className="btn btn-danger-sm" onClick={() => setConfirmDelete(folder)}>Delete</button>
+          </div>
+        ))}
+      </div>
+
+      {confirmDelete && (
+        <div className="modal-overlay" onClick={() => !deleting && setConfirmDelete(null)}>
+          <div className="confirm-dialog">
+            <h3 className="confirm-title">Delete Vehicle</h3>
+            <p className="confirm-body">
+              Delete <strong>{confirmDelete}</strong> and all its recordings from disk? This cannot be undone.
+            </p>
+            <div className="confirm-actions">
+              <button className="btn" onClick={() => setConfirmDelete(null)} disabled={deleting}>Cancel</button>
+              <button className="btn btn-danger" onClick={handleDeleteVehicle} disabled={deleting}>
+                {deleting ? 'Deleting…' : 'Delete Everything'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="general-section">
         <h3 className="general-section-title">Storage Paths</h3>

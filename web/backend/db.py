@@ -610,6 +610,26 @@ def update_clip_duration(clip_id: str, duration: float) -> None:
         )
 
 
+def delete_vehicle_clips(folder: str) -> int:
+    prefix = folder.strip("/") + "/"
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id FROM clips WHERE json_extract(data, '$.relativePath') LIKE ?",
+            (prefix + "%",),
+        ).fetchall()
+        clip_ids = [r[0] for r in rows]
+        cur = conn.execute(
+            "DELETE FROM clips WHERE json_extract(data, '$.relativePath') LIKE ?",
+            (prefix + "%",),
+        )
+        count = cur.rowcount
+        if clip_ids:
+            placeholders = ",".join("?" * len(clip_ids))
+            conn.execute(f"DELETE FROM reencoded_clips WHERE clip_id IN ({placeholders})", clip_ids)
+        conn.execute("DELETE FROM imported_clips WHERE file_path LIKE ?", (prefix + "%",))
+    return count
+
+
 def update_clip_size(clip_id: str, size: int) -> None:
     size_str = byte_count_fmt(size)
     with _get_conn() as conn:
