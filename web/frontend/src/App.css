@@ -279,18 +279,20 @@ body {
   overflow-y: auto;
 }
 
-.day-group { margin-bottom: 32px; }
+.day-group { margin-bottom: 16px; }
 
 .day-header {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-bottom: 12px;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  padding: 4px 0;
   display: flex;
   align-items: center;
   gap: 8px;
+  border-bottom: 1px solid var(--border);
 }
 
 .day-count {
@@ -697,8 +699,8 @@ body {
   .filter-input[type="date"] { min-width: 120px; }
 
   /* Event/day headers: tighter */
-  .day-header { padding: 8px 12px; font-size: 0.85rem; }
-  .day-count { font-size: 0.75rem; }
+  .day-header { font-size: 0.72rem; }
+  .day-count { font-size: 0.68rem; }
 
   /* Clip grid: 2 columns on phones */
   .clip-grid {
@@ -715,7 +717,7 @@ body {
 
   /* Main: no horizontal padding needed */
   .main { padding: 0; }
-  .day-group { margin-bottom: 20px; }
+  .day-group { margin-bottom: 12px; }
 
   /* Modal: full screen */
   .modal-overlay { padding: 0; align-items: flex-end; }

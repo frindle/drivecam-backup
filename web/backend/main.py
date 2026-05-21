@@ -323,18 +323,11 @@ def scan_status():
 @app.get("/api/clips/{path:path}/thumbnail")
 def get_thumbnail(path: str):
     relative_path = urllib.parse.unquote(path)
-    cid = clip_id(relative_path)
-    clips, _, _ = get_all_clips()
-    clip = next((c for c in clips if c.id == cid), None)
-    if not clip:
-        raise HTTPException(status_code=404, detail="Clip not found in cache")
-
     full_path = _resolve_clip_path(relative_path)
     if not full_path:
         raise HTTPException(status_code=404, detail="File not found on disk")
 
-    source = clip.source or "local"
-    thumb_url = generate_thumbnail(full_path, relative_path, source, clip.share_id)
+    thumb_url = generate_thumbnail(full_path, relative_path, "local", None)
     if thumb_url:
         thumb_path = os.path.join(CACHE_DIR, os.path.basename(thumb_url))
         if os.path.exists(thumb_path):
@@ -1062,9 +1055,10 @@ def list_vehicle_folders():
 
 
 @app.get("/api/debug/files")
-def debug_files(limit: int = Query(50, ge=1, le=200)):
-    """Return actual filenames from disk to help diagnose filename format issues."""
+def debug_files(limit: int = Query(50, ge=1, le=500), folder: Optional[str] = Query(None)):
+    """Return actual filenames from disk. Use ?folder=RoadCam to filter."""
     results = []
+    folder_counts: dict = {}
     for base in DATA_PATHS:
         base_path = Path(base)
         if not base_path.is_dir():
@@ -1072,15 +1066,20 @@ def debug_files(limit: int = Query(50, ge=1, le=200)):
         for root, dirs, files in os.walk(base_path):
             for fname in files:
                 ext = Path(fname).suffix.lower()
-                if ext in {".mp4", ".mov", ".ts", ".avi", ".mkv"}:
-                    try:
-                        rel = str(Path(root).relative_to(base_path) / fname)
-                    except ValueError:
-                        rel = fname
+                if ext not in {".mp4", ".mov", ".ts", ".avi", ".mkv"}:
+                    continue
+                try:
+                    rel = str(Path(root).relative_to(base_path) / fname)
+                except ValueError:
+                    rel = fname
+                parts = rel.split("/")
+                top_folder = parts[1] if len(parts) > 1 else parts[0]
+                folder_counts[top_folder] = folder_counts.get(top_folder, 0) + 1
+                if folder and folder.lower() not in rel.lower():
+                    continue
+                if len(results) < limit:
                     results.append(rel)
-                    if len(results) >= limit:
-                        return {"count": len(results), "files": results}
-    return {"count": len(results), "files": results}
+    return {"count": len(results), "folder_counts": folder_counts, "files": results}
 
 
 static_dir = Path(STATIC_PATH)
