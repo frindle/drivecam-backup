@@ -1055,14 +1055,14 @@ body {
   align-items: center;
   gap: 1rem;
   padding: 0.5rem 1rem;
-  background: var(--bg-secondary, #1a1a1a);
-  border-bottom: 1px solid var(--border, #333);
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
   font-size: 0.75rem;
   overflow-x: auto;
 }
-.storage-label { color: var(--text-secondary, #999); white-space: nowrap; }
-.storage-estimate { white-space: nowrap; }
-.storage-estimate strong { color: var(--accent, #e8212a); }
+.storage-label { color: var(--text-muted); white-space: nowrap; }
+.storage-estimate { color: var(--text); white-space: nowrap; }
+.storage-estimate strong { color: var(--accent, #3b82f6); }
 
 /* Import Panel */
 .import-panel {

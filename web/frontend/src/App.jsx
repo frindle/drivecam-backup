@@ -710,6 +710,7 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [scanning, setScanning] = useState(false)
+  const [scanDone, setScanDone] = useState(false)
   const [colorTheme, setColorTheme] = useState('auto')
   const [darkMode, setDarkMode] = useState('auto')
   const [currentColorTheme, setCurrentColorTheme] = useState('default')
@@ -855,6 +856,7 @@ export default function App() {
 
   const handleRescan = async () => {
     setScanning(true)
+    setScanDone(false)
     try {
       await clearCache()
       await triggerScan()
@@ -863,7 +865,9 @@ export default function App() {
         const { scanning } = await getScanStatus()
         if (!scanning) break
       }
-      loadEvents()
+      await loadEvents()
+      setScanDone(true)
+      setTimeout(() => setScanDone(false), 3000)
     } catch {
       loadEvents()
     } finally {
@@ -912,7 +916,7 @@ export default function App() {
             <span className="badge gear-guard">{gearGuardCount} Gear Guard</span>
           )}
           <button className={`btn btn-rescan ${scanning ? 'scanning' : ''}`} onClick={handleRescan} disabled={scanning}>
-            {scanning ? '⏳ Scanning…' : '🔄 Rescan'}
+            {scanning ? '⏳ Scanning…' : scanDone ? '✓ Done' : '🔄 Rescan'}
           </button>
         </div>
       </header>
