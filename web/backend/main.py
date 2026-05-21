@@ -1424,9 +1424,17 @@ def get_app_settings():
 @app.put("/api/settings")
 async def update_app_settings(request: Request):
     body = await request.json()
-    allowed = {"app_name"}
+    allowed = {"app_name", "reencode_enabled"}
+    old_settings = get_settings()
     updates = {k: v for k, v in body.items() if k in allowed}
-    return set_settings(updates)
+    result = set_settings(updates)
+    reencode_just_enabled = (
+        updates.get("reencode_enabled", "").lower() == "true"
+        and old_settings.get("reencode_enabled", "false").lower() != "true"
+    )
+    if reencode_just_enabled:
+        threading.Thread(target=_reencode_old_clips_bg, daemon=True).start()
+    return result
 
 
 @app.get("/api/ingest/status")

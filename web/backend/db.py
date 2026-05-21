@@ -102,9 +102,17 @@ def upsert_clips(clips: List) -> None:
     now = datetime.utcnow().isoformat()
     with _get_conn() as conn:
         for clip in clips:
+            data_json = clip.model_dump_json()
             conn.execute(
-                "INSERT OR REPLACE INTO clips (id, data, updated_at) VALUES (?, ?, ?)",
-                (clip.id, clip.model_dump_json(), now),
+                """INSERT INTO clips (id, data, updated_at) VALUES (?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                     data = CASE
+                       WHEN json_extract(excluded.data, '$.duration') IS NULL
+                       THEN json_set(excluded.data, '$.duration', json_extract(clips.data, '$.duration'))
+                       ELSE excluded.data
+                     END,
+                     updated_at = excluded.updated_at""",
+                (clip.id, data_json, now),
             )
 
 
