@@ -189,7 +189,7 @@ function ImportPanel({ onClose, onImported }) {
     })
   }
 
-const handleDrop = async (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault()
     setIsDragging(false)
     try {
