@@ -46,7 +46,9 @@ export async function triggerScan() {
 }
 
 export async function clearCache() {
-  return apiFetch('/cache/clear');
+  const res = await fetch(`${BASE}/cache/clear`, { method: 'POST' });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
 }
 
 export async function getShares() {
