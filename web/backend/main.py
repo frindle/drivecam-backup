@@ -844,13 +844,12 @@ def upload_clips(paths: str = Form(...), files: List[UploadFile] = File(...)):
             continue
 
         try:
-            content = b""
-            while chunk := file.file.read(64 * 1024 * 1024):
-                content += chunk
-            size_bytes = len(content)
             dest_path = Path(DATA_PATH) / safe_path
             dest_path.parent.mkdir(parents=True, exist_ok=True)
-            dest_path.write_bytes(content)
+            file.file.seek(0)
+            with open(dest_path, "wb") as out:
+                shutil.copyfileobj(file.file, out, length=1024 * 1024)
+            size_bytes = dest_path.stat().st_size
             saved.append(safe_path)
             imported_records.append({"file_path": safe_path, "size_bytes": size_bytes})
         except Exception as e:

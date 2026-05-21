@@ -193,6 +193,8 @@ function ImportPanel({ onClose, onImported }) {
   const [uploadStats, setUploadStats] = useState(null)
   const [reassignOffer, setReassignOffer] = useState(null)
   const [reassigning, setReassigning] = useState(false)
+  const [stopAfterCurrent, setStopAfterCurrent] = useState(false)
+  const stopRef = useRef(false)
 
   const vehicleInfo = useMemo(() => detectVehicle(files), [files])
 
@@ -340,6 +342,8 @@ function ImportPanel({ onClose, onImported }) {
     setError('')
     setUploadStats(null)
     setReassignOffer(null)
+    setStopAfterCurrent(false)
+    stopRef.current = false
 
     const safePaths = filesToUpload.map(({ path, file: fileObj }) => ({
       safe: path.replace(/^\//, ''),
@@ -394,15 +398,26 @@ function ImportPanel({ onClose, onImported }) {
         xhr.send(formData)
       })
 
+    let stoppedAt = null
     for (let i = 0; i < safePaths.length; i++) {
+      if (stopRef.current) {
+        stoppedAt = i
+        break
+      }
       await uploadOne(safePaths[i].safe, safePaths[i].file, i)
     }
 
-    setProgress(100)
+    setProgress(stoppedAt != null ? Math.round((stoppedAt / safePaths.length) * 100) : 100)
     setUploadStats(null)
+    setStopAfterCurrent(false)
+    stopRef.current = false
     let msg = `Imported ${saved} file(s)`
     if (skipped > 0) msg += `, ${skipped} already imported`
     if (errors.length) msg += `, ${errors.length} failed`
+    if (stoppedAt != null) {
+      const remaining = safePaths.length - stoppedAt
+      msg += ` · Stopped — ${remaining} file(s) remaining. Re-import to resume (already saved files will be skipped).`
+    }
     setMessage(msg)
     if (errors.length) setError(errors.slice(0, 5).join('\n'))
     if (saved > 0) {
@@ -544,6 +559,14 @@ function ImportPanel({ onClose, onImported }) {
                         )}
                       </>
                     )}
+                    <button
+                      className="btn btn-clear btn-stop"
+                      onClick={() => { stopRef.current = true; setStopAfterCurrent(true) }}
+                      disabled={stopAfterCurrent}
+                      title="Finish the current file then stop"
+                    >
+                      {stopAfterCurrent ? 'Stopping…' : '⏹ Stop'}
+                    </button>
                   </div>
                 </div>
               ) : (

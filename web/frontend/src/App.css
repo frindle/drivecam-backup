@@ -1088,6 +1088,7 @@ body {
 .progress-meta { display: flex; align-items: center; gap: 0.75rem; font-size: 0.8rem; color: var(--text-secondary); }
 .progress-speed { font-variant-numeric: tabular-nums; }
 .progress-remaining { color: var(--text-muted); }
+.btn-stop { margin-left: auto; font-size: 0.75rem; padding: 0.2rem 0.6rem; }
 
 .vehicle-section { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; background: var(--surface-alt, rgba(255,255,255,0.04)); border: 1px solid var(--border); border-radius: 8px; }
 .vehicle-detected-badge { font-size: 0.75rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; }
