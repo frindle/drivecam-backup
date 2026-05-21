@@ -1406,6 +1406,21 @@ def _purge_old_clips() -> int:
     return total_deleted
 
 
+def _cleanup_encode_fragments() -> int:
+    """Delete any abandoned .tmp265.mp4 temp files left by interrupted re-encodes."""
+    removed = 0
+    for base in DATA_PATHS:
+        for p in Path(base).rglob("*.tmp265.mp4"):
+            try:
+                p.unlink()
+                removed += 1
+            except Exception:
+                pass
+    if removed:
+        print(f"Cleanup: removed {removed} abandoned encode fragment(s)")
+    return removed
+
+
 def _midnight_scheduler():
     while True:
         now = datetime.now()
@@ -1413,9 +1428,10 @@ def _midnight_scheduler():
         sleep_secs = (tomorrow - now).total_seconds()
         time.sleep(sleep_secs)
         try:
+            _cleanup_encode_fragments()
             _purge_old_clips()
         except Exception as e:
-            print(f"Midnight purge error: {e}")
+            print(f"Midnight scheduler error: {e}")
 
 
 @app.get("/api/settings")
@@ -1530,6 +1546,7 @@ def _create_ingest_subfolders():
 @app.on_event("startup")
 def startup():
     _ensure_ingest_dir(INGEST_PATH)
+    _cleanup_encode_fragments()
     threading.Thread(target=_ingest_watcher, daemon=True).start()
     threading.Thread(target=_midnight_scheduler, daemon=True).start()
     if not get_clip_count():
