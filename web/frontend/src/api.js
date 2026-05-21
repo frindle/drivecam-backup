@@ -175,6 +175,26 @@ export async function reassignVehicle(fromFolder, toFolder) {
   return res.json();
 }
 
+export async function getRetentionSettings() {
+  return apiFetch('/retention');
+}
+
+export async function setRetention(vehicleFolder, retentionDays) {
+  const res = await fetch(`${BASE}/retention/${encodeURIComponent(vehicleFolder)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ retention_days: retentionDays }),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export async function runPurgeNow() {
+  const res = await fetch(`${BASE}/retention/run`, { method: 'POST' });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
 export async function deleteClip(clipId) {
   const res = await fetch(`${BASE}/clips/${encodeURIComponent(clipId)}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);

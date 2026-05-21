@@ -72,6 +72,13 @@ def _get_conn():
             imported_at TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS retention_settings (
+            vehicle_folder  TEXT PRIMARY KEY,
+            retention_days  INTEGER,
+            updated_at      TEXT NOT NULL
+        )
+    """)
     try:
         yield conn
     finally:
@@ -545,6 +552,29 @@ def update_imported_clip_paths(path_updates: list) -> None:
                 "UPDATE imported_clips SET file_path = ? WHERE file_path = ?",
                 (new_path, old_path),
             )
+
+
+def get_retention_settings() -> List[dict]:
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT vehicle_folder, retention_days, updated_at FROM retention_settings ORDER BY vehicle_folder"
+        ).fetchall()
+        return [{"vehicle_folder": r[0], "retention_days": r[1], "updated_at": r[2]} for r in rows]
+
+
+def set_retention(vehicle_folder: str, retention_days: Optional[int]) -> None:
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO retention_settings (vehicle_folder, retention_days, updated_at) VALUES (?, ?, ?)",
+            (vehicle_folder, retention_days, now),
+        )
+
+
+def delete_retention(vehicle_folder: str) -> bool:
+    with _get_conn() as conn:
+        cur = conn.execute("DELETE FROM retention_settings WHERE vehicle_folder = ?", (vehicle_folder,))
+        return cur.rowcount > 0
 
 
 def delete_clip_from_db(clip_id: str) -> bool:

@@ -4,8 +4,9 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
@@ -39,6 +40,9 @@ from .db import (
     update_imported_clip_paths,
     delete_clip_from_db,
     delete_clips_by_event_key,
+    get_retention_settings,
+    set_retention,
+    delete_retention,
 )
 from .models import (
     Clip, ClipListResponse, EventSummary, EventListResponse,
@@ -1054,6 +1058,82 @@ def list_vehicle_folders():
     }
 
 
+@app.get("/api/retention")
+def list_retention():
+    return get_retention_settings()
+
+
+@app.put("/api/retention/{vehicle_folder:path}")
+def update_retention(vehicle_folder: str, body: dict):
+    vehicle_folder = urllib.parse.unquote(vehicle_folder)
+    days = body.get("retention_days")
+    if days is not None and not isinstance(days, int):
+        raise HTTPException(status_code=400, detail="retention_days must be an integer or null")
+    set_retention(vehicle_folder, days)
+    return {"vehicle_folder": vehicle_folder, "retention_days": days}
+
+
+@app.delete("/api/retention/{vehicle_folder:path}")
+def remove_retention(vehicle_folder: str):
+    vehicle_folder = urllib.parse.unquote(vehicle_folder)
+    delete_retention(vehicle_folder)
+    return {"status": "deleted"}
+
+
+@app.post("/api/retention/run")
+def run_purge_now():
+    deleted = _purge_old_clips()
+    return {"status": "ok", "deleted": deleted}
+
+
+def _purge_old_clips() -> int:
+    settings = get_retention_settings()
+    if not settings:
+        return 0
+    total_deleted = 0
+    clips, _, _ = get_all_clips(limit=50000)
+    now = datetime.utcnow()
+    for s in settings:
+        if s["retention_days"] is None:
+            continue
+        cutoff = now - timedelta(days=s["retention_days"])
+        prefix = s["vehicle_folder"] + "/"
+        to_delete = [
+            c for c in clips
+            if c.source in (None, "local")
+            and c.timestamp
+            and c.timestamp < cutoff
+            and (c.relativePath.startswith(prefix) or c.relativePath == s["vehicle_folder"])
+        ]
+        for clip in to_delete:
+            full_path = _resolve_clip_path(clip.relativePath)
+            if full_path and os.path.exists(full_path):
+                try:
+                    os.remove(full_path)
+                    parent = Path(full_path).parent
+                    if not any(parent.iterdir()):
+                        parent.rmdir()
+                except OSError:
+                    pass
+            delete_clip_from_db(clip.id)
+            total_deleted += 1
+    if total_deleted:
+        print(f"Midnight purge: deleted {total_deleted} clips")
+    return total_deleted
+
+
+def _midnight_scheduler():
+    while True:
+        now = datetime.now()
+        tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        sleep_secs = (tomorrow - now).total_seconds()
+        time.sleep(sleep_secs)
+        try:
+            _purge_old_clips()
+        except Exception as e:
+            print(f"Midnight purge error: {e}")
+
+
 @app.get("/api/debug/files")
 def debug_files(limit: int = Query(50, ge=1, le=500), folder: Optional[str] = Query(None)):
     """Return actual filenames from disk. Use ?folder=RoadCam to filter."""
@@ -1093,10 +1173,6 @@ else:
 
 @app.on_event("startup")
 def startup():
+    threading.Thread(target=_midnight_scheduler, daemon=True).start()
     if not get_clip_count():
-
-        def do_startup_scan():
-            _refresh_cache_locked()
-
-        t = threading.Thread(target=do_startup_scan, daemon=True)
-        t.start()
+        threading.Thread(target=_refresh_cache_locked, daemon=True).start()

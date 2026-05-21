@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, getStorageStats, getVehicleLabels, reassignVehicle, deleteClip, deleteEvent } from './api'
+import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, getStorageStats, getVehicleLabels, reassignVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow } from './api'
 
 const EVENT_COLORS = {
   driving: '#3b82f6',
@@ -1326,6 +1326,7 @@ function SharesPanel({ onClose, onSaved }) {
         <div className="settings-tabs">
           <button className={`settings-tab ${activeTab === 'shares' ? 'active' : ''}`} onClick={() => setActiveTab('shares')}>Shares</button>
           <button className={`settings-tab ${activeTab === 'cloud' ? 'active' : ''}`} onClick={() => setActiveTab('cloud')}>Cloud</button>
+          <button className={`settings-tab ${activeTab === 'retention' ? 'active' : ''}`} onClick={() => setActiveTab('retention')}>Retention</button>
         </div>
 
         {activeTab === 'shares' && (
@@ -1339,6 +1340,10 @@ function SharesPanel({ onClose, onSaved }) {
 
         {activeTab === 'cloud' && (
           <CloudPanel onClose={onClose} onSaved={onSaved} />
+        )}
+
+        {activeTab === 'retention' && (
+          <RetentionPanel />
         )}
       </div>
     </div>
@@ -1714,6 +1719,112 @@ function CloudPanel({ onClose, onSaved }) {
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+const RETENTION_OPTIONS = [
+  { value: 7,    label: '7 days' },
+  { value: 14,   label: '14 days' },
+  { value: 30,   label: '30 days' },
+  { value: 60,   label: '60 days' },
+  { value: 90,   label: '90 days' },
+  { value: 180,  label: '6 months' },
+  { value: 365,  label: '1 year' },
+  { value: null, label: 'Unlimited' },
+]
+
+function RetentionPanel() {
+  const [settings, setSettings] = useState({})
+  const [vehicleFolders, setVehicleFolders] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(null)
+  const [purging, setPurging] = useState(false)
+  const [purgeResult, setPurgeResult] = useState(null)
+
+  useEffect(() => {
+    Promise.all([getRetentionSettings(), getVehicleLabels()])
+      .then(([ret, veh]) => {
+        const map = {}
+        for (const s of ret) map[s.vehicle_folder] = s.retention_days
+        setSettings(map)
+        setVehicleFolders(veh.folders || [])
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handleChange = async (folder, rawValue) => {
+    const days = rawValue === '' ? null : Number(rawValue)
+    setSaving(folder)
+    try {
+      await setRetention(folder, days)
+      setSettings(prev => ({ ...prev, [folder]: days }))
+    } catch (e) {
+      alert('Save failed: ' + e.message)
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  const handlePurgeNow = async () => {
+    if (!confirm('Run purge now? This will permanently delete clips beyond their retention limit.')) return
+    setPurging(true)
+    setPurgeResult(null)
+    try {
+      const result = await runPurgeNow()
+      setPurgeResult(result.deleted)
+    } catch (e) {
+      alert('Purge failed: ' + e.message)
+    } finally {
+      setPurging(false)
+    }
+  }
+
+  if (loading) return <div className="shares-loading">Loading…</div>
+
+  return (
+    <div className="shares-body">
+      <p className="retention-desc">
+        Clips older than the selected period are deleted automatically at midnight.
+        Set to Unlimited to keep forever.
+      </p>
+      {vehicleFolders.length === 0 ? (
+        <div className="shares-empty">No vehicles found. Import footage first.</div>
+      ) : (
+        <div className="retention-list">
+          {vehicleFolders.map(folder => {
+            const current = settings[folder] ?? null
+            return (
+              <div key={folder} className="retention-row">
+                <div className="retention-vehicle">{formatVehicleFolder(folder)}</div>
+                <div className="retention-folder-name">{folder}</div>
+                <select
+                  className="filter-select retention-select"
+                  value={current === null ? '' : String(current)}
+                  onChange={e => handleChange(folder, e.target.value)}
+                  disabled={saving === folder}
+                >
+                  {RETENTION_OPTIONS.map(o => (
+                    <option key={o.label} value={o.value === null ? '' : String(o.value)}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                {saving === folder && <span className="retention-saving">Saving…</span>}
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <div className="retention-footer">
+        <button className="btn btn-clear" onClick={handlePurgeNow} disabled={purging}>
+          {purging ? '⏳ Running…' : '🗑️ Run Purge Now'}
+        </button>
+        {purgeResult !== null && (
+          <span className="retention-result">{purgeResult} clip{purgeResult !== 1 ? 's' : ''} deleted</span>
+        )}
+      </div>
     </div>
   )
 }

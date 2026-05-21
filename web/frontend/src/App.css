@@ -1141,3 +1141,60 @@ body {
 }
 .import-dropzone .dropzone-hint { font-size: 0.75rem; color: var(--text-muted); }
 .import-dropzone .btn { margin-top: 0.5rem; }
+
+/* ─── Retention Panel ────────────────────────────────────── */
+.retention-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.retention-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 20px;
+}
+
+.retention-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.retention-vehicle {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.retention-folder-name {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.retention-select { width: 120px; }
+
+.retention-saving { font-size: 0.72rem; color: var(--text-muted); }
+
+.retention-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.retention-result {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
