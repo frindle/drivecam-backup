@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, getStorageStats, getVehicleLabels, reassignVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus } from './api'
+import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, checkImported, getStorageStats, getVehicleLabels, reassignVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus } from './api'
 
 const EVENT_COLORS = {
   driving: '#3b82f6',
@@ -372,15 +372,32 @@ function ImportPanel({ onClose, onImported }) {
     setStopAfterCurrent(false)
     stopRef.current = false
 
-    const safePaths = filesToUpload.map(({ path, file: fileObj }) => ({
+    const allSafePaths = filesToUpload.map(({ path, file: fileObj }) => ({
       safe: path.replace(/^\//, ''),
       file: fileObj,
     }))
 
+    let preSkipped = 0
+    let safePaths = allSafePaths
+    try {
+      const checkResult = await checkImported(allSafePaths.map(p => p.safe))
+      const importedSet = new Set(checkResult.imported || [])
+      safePaths = allSafePaths.filter(p => !importedSet.has(p.safe))
+      preSkipped = allSafePaths.length - safePaths.length
+    } catch {
+      // if check fails, proceed with all files (server will dedup on write)
+    }
+
+    if (safePaths.length === 0) {
+      setUploading(false)
+      setMessage(`All ${preSkipped} file(s) already imported — nothing to do.`)
+      return
+    }
+
     const totalBytes = safePaths.reduce((sum, { file }) => sum + (file?.size || 0), 0)
     const startTime = Date.now()
     let bytesCompleted = 0
-    let saved = 0, skipped = 0
+    let saved = 0, skipped = preSkipped
     const errors = []
 
     const uploadOne = (safe, file, idx) =>

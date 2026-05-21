@@ -36,6 +36,7 @@ from .db import (
     delete_cloud_provider,
     test_cloud_provider as db_test_cloud_provider,
     is_clip_imported,
+    filter_already_imported,
     mark_clips_imported,
     update_imported_clip_paths,
     delete_clip_from_db,
@@ -924,6 +925,17 @@ def get_oauth_url(provider: str):
         return {"url": url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/upload/check")
+async def check_already_imported(request: Request):
+    body = await request.json()
+    paths = body.get("paths", [])
+    safe_paths = [p.replace("..", "").lstrip("/") for p in paths]
+    imported = set(filter_already_imported(safe_paths))
+    on_disk = {p for p in safe_paths if (Path(DATA_PATH) / p).exists()}
+    already = sorted(imported | on_disk)
+    return {"imported": already}
 
 
 @app.post("/api/upload")

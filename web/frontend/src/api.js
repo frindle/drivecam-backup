@@ -144,6 +144,16 @@ export async function getCloudOAuthUrl(provider) {
   return apiFetch(`/cloud/oauth/${provider}/url`);
 }
 
+export async function checkImported(paths) {
+  const res = await fetch(`${BASE}/upload/check`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
 export async function uploadFiles(formData) {
   const res = await fetch(`${BASE}/upload`, { method: 'POST', body: formData });
   if (!res.ok) {

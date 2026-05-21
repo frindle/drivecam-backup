@@ -524,6 +524,18 @@ def is_clip_imported(file_path: str) -> bool:
         return row is not None
 
 
+def filter_already_imported(paths: List[str]) -> List[str]:
+    if not paths:
+        return []
+    with _get_conn() as conn:
+        placeholders = ",".join("?" * len(paths))
+        rows = conn.execute(
+            f"SELECT file_path FROM imported_clips WHERE file_path IN ({placeholders})",
+            paths,
+        ).fetchall()
+    return [r[0] for r in rows]
+
+
 def mark_clips_imported(imported_paths: List[dict]) -> int:
     now = datetime.utcnow().isoformat()
     count = 0
