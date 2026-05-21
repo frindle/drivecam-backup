@@ -94,18 +94,18 @@ function byteCountFmt(bytes) {
   return `${bytes.toFixed(1)} PB`
 }
 
-function StorageCalculator({ stats, onImportClick }) {
+function StorageCalculator({ stats }) {
   if (!stats) return null
   if (!stats.total_clips) {
     return (
       <div className="storage-calculator">
-        <span className="storage-label">No footage yet.</span>
-        <span className="storage-label">Import SD Card to get started.</span>
+        <span className="storage-label">No footage yet — import an SD card to get started.</span>
       </div>
     )
   }
-  const { clips_per_hour, total_size_bytes, total_clips } = stats
-  if (!clips_per_hour || clips_per_hour === 0) return null
+
+  const bytesPerHour = stats.bytes_per_recording_hour
+  if (!bytesPerHour || bytesPerHour === 0) return null
 
   const GB = 1024 ** 3
   const sizes = [
@@ -117,14 +117,18 @@ function StorageCalculator({ stats, onImportClick }) {
 
   return (
     <div className="storage-calculator">
-      <span className="storage-label">SD card estimate:</span>
+      <span className="storage-label">SD card capacity:</span>
       {sizes.map(({ label, gb }) => {
-        const bytesPerHour = clips_per_hour * (total_size_bytes / total_clips)
-        const hoursLeft = (gb * GB) / bytesPerHour
-        const daysLeft = hoursLeft / 24
+        const hours = (gb * GB) / bytesPerHour
+        const days = hours / 24
+        const display = hours < 1
+          ? `${Math.round(hours * 60)}m`
+          : hours < 24
+            ? `${hours.toFixed(1)}h`
+            : `${days.toFixed(1)}d`
         return (
-          <span key={label} className="storage-estimate" title={`${Math.round(hoursLeft)}h of footage`}>
-            {label}: <strong>{daysLeft < 1 ? `${Math.round(hoursLeft)}h` : `${Math.round(daysLeft)}d`}</strong>
+          <span key={label} className="storage-estimate" title={`~${hours.toFixed(1)}h of recording`}>
+            {label}: <strong>{display}</strong>
           </span>
         )
       })}

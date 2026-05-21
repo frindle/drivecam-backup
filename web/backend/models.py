@@ -217,6 +217,8 @@ class StorageStatsResponse(BaseModel):
     avg_clip_size_string: str
     clips_per_hour: float
     hours_of_footage: float
+    bytes_per_recording_hour: float = 0.0
+    recording_hours: float = 0.0
     vehicles: dict
     by_vehicle: dict
 

@@ -1036,6 +1036,29 @@ def storage_stats():
         hours_of_footage = span_h
         clips_per_hour = len(clips) / span_h if span_h > 0 else 0
 
+    # Cluster clips by drive session (gap > 5 min = new session) to get
+    # actual recording hours, then derive bytes per recording hour.
+    SESSION_GAP_SECS = 300
+    recording_hours = 0.0
+    bytes_per_recording_hour = 0.0
+    ts_size_pairs = sorted(
+        [(c.timestamp, c.size) for c in clips if c.timestamp],
+        key=lambda x: x[0],
+    )
+    if ts_size_pairs:
+        session_start = ts_size_pairs[0][0]
+        session_end = ts_size_pairs[0][0]
+        for ts, _ in ts_size_pairs[1:]:
+            if (ts - session_end).total_seconds() <= SESSION_GAP_SECS:
+                session_end = ts
+            else:
+                recording_hours += max((session_end - session_start).total_seconds() / 3600, 1 / 60)
+                session_start = ts
+                session_end = ts
+        recording_hours += max((session_end - session_start).total_seconds() / 3600, 1 / 60)
+        if recording_hours > 0:
+            bytes_per_recording_hour = total_size / recording_hours
+
     vehicle_info = {v: {"clips": d["clips"], "size": d["size"]} for v, d in by_vehicle.items()}
 
     return StorageStatsResponse(
@@ -1046,6 +1069,8 @@ def storage_stats():
         avg_clip_size_string=avg_str,
         clips_per_hour=round(clips_per_hour, 1),
         hours_of_footage=round(hours_of_footage, 1),
+        bytes_per_recording_hour=round(bytes_per_recording_hour, 0),
+        recording_hours=round(recording_hours, 1),
         vehicles=vehicle_info,
         by_vehicle=by_vehicle,
     )
