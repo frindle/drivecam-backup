@@ -19,11 +19,9 @@ FOLDER_EVENT_MAP = {
         "SentryClips": EventType.GEAR_GUARD,
     },
     VehicleType.RIVIAN: {
-        "dashcam": EventType.DRIVING,
-        "saved": EventType.MANUALLY_SAVED,
-        "gearguard": EventType.GEAR_GUARD,
-        "gear_guard": EventType.GEAR_GUARD,
-        "GearGuard": EventType.GEAR_GUARD,
+        "GearGuardVideo": EventType.GEAR_GUARD,
+        "IncidentCam": EventType.MANUALLY_SAVED,
+        "RoadCam": EventType.DRIVING,
     },
 }
 
@@ -42,14 +40,15 @@ RIVIAN_FILENAME_RE = re.compile(
 
 
 TESLA_ROOTS = {"teslacam"}
-RIVIAN_ROOTS = {"rivian_dashcam", "rivian", "dashcam"}
+RIVIAN_ROOTS = {"rivian_dashcam"}
+RIVIAN_EVENT_FOLDERS = {"gearguardvideo", "incidentcam", "roadcam"}
 
 
 def detect_vehicle_from_folder(folder_name: str) -> VehicleType:
     fl = folder_name.lower()
     if fl in TESLA_ROOTS:
         return VehicleType.TESLA
-    if fl in RIVIAN_ROOTS:
+    if fl in RIVIAN_ROOTS or fl in RIVIAN_EVENT_FOLDERS:
         return VehicleType.RIVIAN
     for root in TESLA_ROOTS:
         if fl.startswith(root + "_"):
@@ -136,6 +135,16 @@ def _scan_single_path(base_path: str, clip_folders: Optional[List[str]] = None) 
 
     for vehicle_root in os.scandir(share):
         if not vehicle_root.is_dir():
+            continue
+
+        # Rivian flat SD card structure: GearGuardVideo / IncidentCam / RoadCam at data root
+        if vehicle_root.name.lower() in RIVIAN_EVENT_FOLDERS:
+            event_map = FOLDER_EVENT_MAP.get(VehicleType.RIVIAN, {})
+            event_type = event_map.get(vehicle_root.name, EventType.UNKNOWN)
+            for file_path, _ in _walk_folder(Path(vehicle_root.path), base_path):
+                clip = _build_clip(file_path, vehicle_root.name, VehicleType.RIVIAN, event_type, base_path)
+                if clip:
+                    found.append(clip)
             continue
 
         vehicle = detect_vehicle_from_folder(vehicle_root.name)

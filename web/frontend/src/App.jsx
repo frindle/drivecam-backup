@@ -131,10 +131,10 @@ const VEHICLE_DEFS = [
     subfolders: ['recentclips', 'savedclips', 'sentryclips'],
   },
   {
-    patterns: ['rivian_dashcam', 'rivian', 'dashcam'],
+    patterns: ['rivian_dashcam'],
     canonical: 'rivian_dashcam',
     label: 'Rivian',
-    subfolders: ['dashcam', 'saved', 'gearguard', 'gear_guard'],
+    subfolders: ['gearguardvideo', 'incidentcam', 'roadcam'],
   },
 ]
 
@@ -396,7 +396,6 @@ function ImportPanel({ onClose, onImported }) {
 
     for (let i = 0; i < safePaths.length; i++) {
       await uploadOne(safePaths[i].safe, safePaths[i].file, i)
-      setProgress(Math.round(((i + 1) / safePaths.length) * 100))
     }
 
     setProgress(100)
@@ -452,8 +451,8 @@ function ImportPanel({ onClose, onImported }) {
 
         <div className="import-body">
           <p className="import-desc">
-            Select the root folder of your SD card (TeslaCam, USB DRIVE, etc.).<br />
-            Subfolders like RecentClips, SavedClips, dashcam are auto-detected.
+            Select your SD card root folder. Tesla: select the TeslaCam folder.
+            Rivian: select the SD card root (contains GearGuardVideo, IncidentCam, RoadCam).
           </p>
 
           <div
