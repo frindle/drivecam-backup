@@ -32,7 +32,8 @@ TESLA_FILENAME_RE = re.compile(
 
 RIVIAN_FILENAME_RE = re.compile(
     r"^(\d{2})_(\d{2})_(\d{2})_(\d{2})(\d{2})(\d{2})"
-    r"(?:[_-](front-center|rear-center|side-left|side-right|front|rear|back|left|right|cabin|driver|passenger))?"
+    r"(?:_video_(frontCenter|rearCenter|sideLeft|sideRight|front|rear|back|left|right|cabin))?"
+    r"(?:_t)?"
     r"\.(mp4|mov|ts|avi|mkv)$",
     re.IGNORECASE,
 )
@@ -87,10 +88,10 @@ def parse_camera_angle(filename: str, vehicle: VehicleType) -> CameraAngle:
         if "right" in fn: return CameraAngle.RIGHT
         if "cabin" in fn: return CameraAngle.CABIN
     if vehicle == VehicleType.RIVIAN:
-        if "front" in fn: return CameraAngle.FRONT
-        if "rear" in fn or "back" in fn: return CameraAngle.BACK
-        if "left" in fn: return CameraAngle.LEFT
-        if "right" in fn: return CameraAngle.RIGHT
+        if "frontcenter" in fn or "front" in fn: return CameraAngle.FRONT
+        if "rearcenter" in fn or "rear" in fn or "back" in fn: return CameraAngle.BACK
+        if "sideleft" in fn or "left" in fn: return CameraAngle.LEFT
+        if "sideright" in fn or "right" in fn: return CameraAngle.RIGHT
         if "cabin" in fn or "interior" in fn or "driver" in fn: return CameraAngle.CABIN
     return CameraAngle.UNKNOWN
 
@@ -118,6 +119,10 @@ _CAMERA_SUFFIXES = (
 
 def _strip_camera_suffix(stem: str) -> str:
     """Remove trailing camera name from a filename stem to get a grouping key."""
+    # Rivian: MM_DD_YY_HHMMSS_video_cameraName[_t]  — strip from _video_ onward
+    idx = stem.lower().find("_video_")
+    if idx != -1:
+        return stem[:idx]
     sl = stem.lower()
     for cam in _CAMERA_SUFFIXES:
         for sep in ("_", "-"):
