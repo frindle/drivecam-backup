@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, checkImported, getStorageStats, getVehicleLabels, reassignVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus } from './api'
+import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, checkImported, getStorageStats, getVehicleLabels, reassignVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus, getAppSettings, updateAppSettings } from './api'
 
 const EVENT_COLORS = {
   driving: '#3b82f6',
@@ -224,6 +224,7 @@ function ImportPanel({ onClose, onImported }) {
   const [stopAfterCurrent, setStopAfterCurrent] = useState(false)
   const stopRef = useRef(false)
   const [ingestStatus, setIngestStatus] = useState(null)
+  const [ingestTip, setIngestTip] = useState('')
 
   const vehicleInfo = useMemo(() => detectVehicle(files), [files])
 
@@ -477,11 +478,13 @@ function ImportPanel({ onClose, onImported }) {
     if (saved > 0) {
       onImported()
       if (vehicleInfo && vehicleLabel.trim()) {
+        const folder = `${vehicleInfo.def.canonical}_${vehicleLabel.trim()}`
+        setIngestTip(folder)
         try {
           const data = await getVehicleLabels()
           const unlabeled = vehicleInfo.def.canonical
           if ((data.folders || []).includes(unlabeled)) {
-            setReassignOffer({ fromFolder: unlabeled, toFolder: `${unlabeled}_${vehicleLabel.trim()}` })
+            setReassignOffer({ fromFolder: unlabeled, toFolder: folder })
           }
         } catch {}
       }
@@ -588,6 +591,12 @@ function ImportPanel({ onClose, onImported }) {
           )}
 
           {message && <div className="import-message">{message}</div>}
+          {ingestTip && (
+            <div className="import-ingest-tip">
+              💡 Next time, drop your SD card directly into your Drivecam share:<br />
+              <code>ingest/{ingestTip}/</code>
+            </div>
+          )}
           {error && <div className="import-error">{error}</div>}
 
           {files.length > 0 && (
@@ -703,6 +712,7 @@ export default function App() {
   const [showShares, setShowShares] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [storageStats, setStorageStats] = useState(null)
+  const [appSettings, setAppSettings] = useState({ app_name: 'DriveCam' })
   const [hasMore, setHasMore] = useState(false)
   const [oldestTimestamp, setOldestTimestamp] = useState(null)
   const loadMoreRef = useRef(null)
@@ -771,6 +781,9 @@ export default function App() {
 
   useEffect(() => { loadHealth() }, [loadHealth])
   useEffect(() => { loadEvents() }, [loadEvents])
+  useEffect(() => {
+    getAppSettings().then(setAppSettings).catch(() => {})
+  }, [])
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -861,7 +874,7 @@ export default function App() {
       <header className="header">
         <div className="header-left">
           <span className="logo">🚗</span>
-          <h1 className="title">DriveCam Viewer</h1>
+          <h1 className="title">{appSettings.app_name}</h1>
           {health && <span className={`status-dot ${health.status}`} title={`${eventCount} events cached`} />}
         </div>
         <div className="header-right">
@@ -1260,6 +1273,64 @@ function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
   )
 }
 
+function GeneralPanel({ onSettingsChange }) {
+  const [settings, setSettings] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSavedFlag] = useState(false)
+
+  useEffect(() => {
+    getAppSettings().then(setSettings).catch(() => {})
+  }, [])
+
+  const handleSave = async () => {
+    if (!settings) return
+    setSaving(true)
+    try {
+      const updated = await updateAppSettings({ app_name: settings.app_name })
+      setSettings(updated)
+      setSavedFlag(true)
+      setTimeout(() => setSavedFlag(false), 2000)
+      if (onSettingsChange) onSettingsChange()
+    } catch {}
+    setSaving(false)
+  }
+
+  if (!settings) return <div className="retention-body"><div className="spinner small" /></div>
+
+  return (
+    <div className="retention-body">
+      <div className="general-section">
+        <h3 className="general-section-title">App</h3>
+        <div className="general-row">
+          <label className="general-label">Name</label>
+          <input
+            className="general-input"
+            value={settings.app_name}
+            onChange={e => setSettings(s => ({ ...s, app_name: e.target.value }))}
+            placeholder="DriveCam"
+          />
+        </div>
+        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save'}
+        </button>
+      </div>
+
+      <div className="general-section">
+        <h3 className="general-section-title">Storage Paths</h3>
+        <div className="general-path-row">
+          <span className="general-path-label">Data</span>
+          <code className="general-path-value">{settings.data_path}</code>
+        </div>
+        <div className="general-path-row">
+          <span className="general-path-label">Ingest</span>
+          <code className="general-path-value">{settings.ingest_path}</code>
+        </div>
+        <p className="general-path-hint">These are paths inside the Docker container. Map them to your host via volume mounts in docker-compose.yml.</p>
+      </div>
+    </div>
+  )
+}
+
 function SharesPanel({ onClose, onSaved }) {
   const [shares, setShares] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1270,7 +1341,7 @@ function SharesPanel({ onClose, onSaved }) {
   const [testResult, setTestResult] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [activeTab, setActiveTab] = useState('shares')
+  const [activeTab, setActiveTab] = useState('general')
 
   const loadShares = useCallback(async () => {
     setLoading(true)
@@ -1389,10 +1460,15 @@ function SharesPanel({ onClose, onSaved }) {
         </div>
 
         <div className="settings-tabs">
+          <button className={`settings-tab ${activeTab === 'general' ? 'active' : ''}`} onClick={() => setActiveTab('general')}>General</button>
           <button className={`settings-tab ${activeTab === 'shares' ? 'active' : ''}`} onClick={() => setActiveTab('shares')}>Shares</button>
           <button className={`settings-tab ${activeTab === 'cloud' ? 'active' : ''}`} onClick={() => setActiveTab('cloud')}>Cloud</button>
           <button className={`settings-tab ${activeTab === 'retention' ? 'active' : ''}`} onClick={() => setActiveTab('retention')}>Retention</button>
         </div>
+
+        {activeTab === 'general' && (
+          <GeneralPanel onSettingsChange={onSaved} />
+        )}
 
         {activeTab === 'shares' && (
           <SharesTab

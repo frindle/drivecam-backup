@@ -44,6 +44,8 @@ from .db import (
     get_retention_settings,
     set_retention,
     delete_retention,
+    get_settings,
+    set_settings,
 )
 from .models import (
     Clip, ClipListResponse, EventSummary, EventListResponse,
@@ -1220,6 +1222,22 @@ def _midnight_scheduler():
             print(f"Midnight purge error: {e}")
 
 
+@app.get("/api/settings")
+def get_app_settings():
+    s = get_settings()
+    s["data_path"] = DATA_PATH
+    s["ingest_path"] = INGEST_PATH
+    return s
+
+
+@app.put("/api/settings")
+async def update_app_settings(request: Request):
+    body = await request.json()
+    allowed = {"app_name"}
+    updates = {k: v for k, v in body.items() if k in allowed}
+    return set_settings(updates)
+
+
 @app.get("/api/ingest/status")
 def ingest_status():
     ingest = Path(INGEST_PATH)
@@ -1284,6 +1302,14 @@ else:
         return {"message": "DriveCam Web Viewer", "docs": "/api/docs"}
 
 
+def _ensure_ingest_dir(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+    try:
+        os.chmod(path, 0o777)
+    except OSError:
+        pass
+
+
 def _create_ingest_subfolders():
     clips, _, _ = get_all_clips(limit=2000)
     folders = {
@@ -1292,12 +1318,12 @@ def _create_ingest_subfolders():
         if c.source in (None, "local") and "/" in c.relativePath
     }
     for folder in folders:
-        os.makedirs(os.path.join(INGEST_PATH, folder), exist_ok=True)
+        _ensure_ingest_dir(os.path.join(INGEST_PATH, folder))
 
 
 @app.on_event("startup")
 def startup():
-    os.makedirs(INGEST_PATH, exist_ok=True)
+    _ensure_ingest_dir(INGEST_PATH)
     threading.Thread(target=_ingest_watcher, daemon=True).start()
     threading.Thread(target=_midnight_scheduler, daemon=True).start()
     if not get_clip_count():

@@ -1199,6 +1199,83 @@ body {
   color: var(--text-muted);
 }
 
+/* ─── Import Ingest Tip ─────────────────────────────────── */
+.import-ingest-tip {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: var(--radius);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.import-ingest-tip code {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+/* ─── General Settings Panel ────────────────────────────── */
+.general-section {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.general-section:last-child { border-bottom: none; }
+.general-section-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.general-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.general-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  width: 80px;
+  flex-shrink: 0;
+}
+.general-input {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.general-path-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.general-path-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  width: 50px;
+  flex-shrink: 0;
+}
+.general-path-value {
+  font-size: 0.82rem;
+  color: var(--text);
+  word-break: break-all;
+}
+.general-path-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
 /* ─── Ingest Zone ───────────────────────────────────────── */
 .ingest-zone {
   margin-top: 20px;

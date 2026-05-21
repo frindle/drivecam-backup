@@ -220,3 +220,17 @@ export async function deleteEvent(eventKey) {
 export async function getIngestStatus() {
   return apiFetch('/ingest/status');
 }
+
+export async function getAppSettings() {
+  return apiFetch('/settings');
+}
+
+export async function updateAppSettings(settings) {
+  const res = await fetch(`${BASE}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}

@@ -79,6 +79,13 @@ def _get_conn():
             updated_at      TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key         TEXT PRIMARY KEY,
+            value       TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        )
+    """)
     try:
         yield conn
     finally:
@@ -602,3 +609,30 @@ def delete_clips_by_event_key(event_key: str) -> int:
             (event_key,),
         )
         return cur.rowcount
+
+
+# ─── App Settings ────────────────────────────────────────────
+
+SETTING_DEFAULTS = {
+    "app_name": "DriveCam",
+}
+
+
+def get_settings() -> dict:
+    with _get_conn() as conn:
+        rows = conn.execute("SELECT key, value FROM app_settings").fetchall()
+    result = dict(SETTING_DEFAULTS)
+    for key, value in rows:
+        result[key] = value
+    return result
+
+
+def set_settings(updates: dict) -> dict:
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        for key, value in updates.items():
+            conn.execute(
+                "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)",
+                (key, str(value), now),
+            )
+    return get_settings()
