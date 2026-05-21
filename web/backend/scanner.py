@@ -32,8 +32,8 @@ TESLA_FILENAME_RE = re.compile(
 
 RIVIAN_FILENAME_RE = re.compile(
     r"^(\d{2})_(\d{2})_(\d{2})_(\d{2})(\d{2})(\d{2})"
-    r"(?:_video_(frontCenter|rearCenter|sideLeft|sideRight|front|rear|back|left|right|cabin))?"
-    r"(?:_t)?"
+    r"(?:(?:_video_|_)(frontCenter|rearCenter|sideLeft|sideRight|front|rear|back|left|right|cabin))?"
+    r"(?:_t|_\d+)?"
     r"\.(mp4|mov|ts|avi|mkv)$",
     re.IGNORECASE,
 )
@@ -119,15 +119,17 @@ _CAMERA_SUFFIXES = (
 
 def _strip_camera_suffix(stem: str) -> str:
     """Remove trailing camera name from a filename stem to get a grouping key."""
-    # Rivian: MM_DD_YY_HHMMSS_video_cameraName[_t]  — strip from _video_ onward
     idx = stem.lower().find("_video_")
     if idx != -1:
         return stem[:idx]
-    sl = stem.lower()
-    for cam in _CAMERA_SUFFIXES:
-        for sep in ("_", "-"):
-            if sl.endswith(sep + cam):
-                return stem[: -(len(sep) + len(cam))]
+    # Strip trailing sequence number (_001, _002, …) then camera name
+    stripped = re.sub(r'_\d{3,}$', '', stem)
+    for s in (stripped, stem):
+        sl = s.lower()
+        for cam in _CAMERA_SUFFIXES:
+            for sep in ("_", "-"):
+                if sl.endswith(sep + cam):
+                    return s[: -(len(sep) + len(cam))]
     return stem
 
 
@@ -198,6 +200,8 @@ def _walk_folder(folder_path: Path, base_path: str):
     for root, _, files in os.walk(folder_path):
         root_path = Path(root)
         for fname in files:
+            if fname.startswith('._'):
+                continue
             ext = Path(fname).suffix.lower()
             if ext not in VIDEO_EXTENSIONS:
                 continue
