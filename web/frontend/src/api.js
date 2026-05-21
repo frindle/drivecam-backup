@@ -229,6 +229,10 @@ export async function getIngestStatus() {
   return apiFetch('/ingest/status');
 }
 
+export async function getReencodeStatus() {
+  return apiFetch('/reencode/status');
+}
+
 export async function getAppSettings() {
   return apiFetch('/settings');
 }

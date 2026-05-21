@@ -227,6 +227,14 @@ def _ingest_watcher():
 
 _nvenc_available: Optional[bool] = None
 _reencoding = False
+_reencode_state: dict = {
+    "running": False,
+    "total": 0,
+    "done": 0,
+    "current": None,
+    "start_time": None,
+    "saved_bytes": 0,
+}
 
 
 def _check_nvenc() -> bool:
@@ -289,7 +297,7 @@ def _reencode_clip(file_path: str, encoder: str) -> Optional[int]:
 
 def _reencode_old_clips_bg() -> None:
     """Background: re-encode local clips older than 14 days to H.265."""
-    global _reencoding
+    global _reencoding, _reencode_state
     settings = get_settings()
     if settings.get('reencode_enabled', 'false').lower() != 'true':
         return
@@ -311,11 +319,13 @@ def _reencode_old_clips_bg() -> None:
         if not pending:
             return
         print(f"Re-encode: {len(pending)} clips eligible (>{14}d old), encoder={encoder}")
+        _reencode_state.update({"running": True, "total": len(pending), "done": 0, "current": None, "start_time": time.time(), "saved_bytes": 0})
         done = saved_bytes = 0
         for clip in pending:
             for base in DATA_PATHS:
                 full = os.path.join(base, clip.relativePath)
                 if os.path.exists(full):
+                    _reencode_state["current"] = os.path.basename(full)
                     orig_size = os.path.getsize(full)
                     new_size = _reencode_clip(full, encoder)
                     if new_size is not None:
@@ -323,10 +333,13 @@ def _reencode_old_clips_bg() -> None:
                         update_clip_size(clip.id, new_size)
                     mark_reencoded(clip.id)
                     done += 1
+                    _reencode_state["done"] = done
+                    _reencode_state["saved_bytes"] = saved_bytes
                     break
         print(f"Re-encode: complete — {done} clips processed, {byte_count_fmt(saved_bytes)} saved")
     finally:
         _reencoding = False
+        _reencode_state.update({"running": False, "current": None})
 
 
 def _enrich_durations_bg() -> None:
@@ -533,6 +546,27 @@ def scan_status():
     with _scan_lock:
         scanning = _is_scanning
     return {"scanning": scanning, "lastScanAt": _last_scan_at}
+
+
+@app.get("/api/reencode/status")
+def reencode_status():
+    s = _reencode_state
+    remaining = s["total"] - s["done"]
+    eta_seconds = None
+    if s["running"] and s["done"] > 0 and s["start_time"]:
+        elapsed = time.time() - s["start_time"]
+        rate = s["done"] / elapsed
+        if rate > 0:
+            eta_seconds = remaining / rate
+    return {
+        "running": s["running"],
+        "total": s["total"],
+        "done": s["done"],
+        "remaining": remaining,
+        "current": s["current"],
+        "savedBytes": s["saved_bytes"],
+        "etaSeconds": eta_seconds,
+    }
 
 
 @app.get("/api/clips/{path:path}/thumbnail")
@@ -1553,3 +1587,5 @@ def startup():
         threading.Thread(target=_refresh_cache_locked, daemon=True).start()
     else:
         _create_ingest_subfolders()
+        threading.Thread(target=_enrich_durations_bg, daemon=True).start()
+        threading.Thread(target=_reencode_old_clips_bg, daemon=True).start()

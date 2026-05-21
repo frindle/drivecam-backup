@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { getEvents, getClips, getHealth, triggerScan, clearCache, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, checkImported, getStorageStats, getVehicleLabels, reassignVehicle, deleteVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus, getAppSettings, updateAppSettings } from './api'
+import { getEvents, getClips, getHealth, triggerScan, clearCache, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, checkImported, getStorageStats, getVehicleLabels, reassignVehicle, deleteVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus, getAppSettings, updateAppSettings, getReencodeStatus } from './api'
 
 const EVENT_COLORS = {
   driving: '#3b82f6',
@@ -125,6 +125,27 @@ function StorageCalculator({ stats }) {
         )
       })}
     </>
+  )
+}
+
+function ReencodeStatus({ status }) {
+  if (!status || !status.running) return null
+  const { done, total, etaSeconds, savedBytes } = status
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0
+
+  let eta = ''
+  if (etaSeconds != null) {
+    if (etaSeconds < 60) eta = `~${Math.round(etaSeconds)}s`
+    else if (etaSeconds < 3600) eta = `~${Math.round(etaSeconds / 60)}m`
+    else eta = `~${(etaSeconds / 3600).toFixed(1)}h`
+  }
+
+  const saved = savedBytes > 0 ? ` · ${byteCountFmt(savedBytes)} saved` : ''
+
+  return (
+    <span className="reencode-chip" title={`Re-encoding ${done}/${total} clips${saved}`}>
+      ⚙️ {done}/{total} ({pct}%){eta ? ` ${eta}` : ''}{saved}
+    </span>
   )
 }
 
@@ -711,6 +732,7 @@ export default function App() {
   const [showImport, setShowImport] = useState(false)
   const [storageStats, setStorageStats] = useState(null)
   const [appSettings, setAppSettings] = useState({ app_name: 'DriveCam' })
+  const [reencodeStatus, setReencodeStatus] = useState(null)
   const [hasMore, setHasMore] = useState(false)
   const [oldestTimestamp, setOldestTimestamp] = useState(null)
   const loadMoreRef = useRef(null)
@@ -781,6 +803,18 @@ export default function App() {
   useEffect(() => { loadEvents() }, [loadEvents])
   useEffect(() => {
     getAppSettings().then(setAppSettings).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    let tid
+    const poll = () => {
+      getReencodeStatus().then(s => {
+        setReencodeStatus(s)
+        tid = setTimeout(poll, s.running ? 3000 : 30000)
+      }).catch(() => { tid = setTimeout(poll, 30000) })
+    }
+    poll()
+    return () => clearTimeout(tid)
   }, [])
 
   useEffect(() => {
@@ -904,6 +938,7 @@ export default function App() {
             📤
           </button>
           {storageStats && <div className="header-capacity"><StorageCalculator stats={storageStats} /></div>}
+          <ReencodeStatus status={reencodeStatus} />
           <span className="clip-count">{eventCount} events{hasMore ? '+' : ''}</span>
           {gearGuardCount > 0 && (
             <span className="badge gear-guard">{gearGuardCount} Gear Guard</span>
@@ -1054,6 +1089,9 @@ function EventCard({ event, onClick }) {
         <div className="clip-meta">
           <span className="clip-camera">{event.cameraCount} cam{event.cameraCount > 1 ? 's' : ''}</span>
           <span className="clip-folder">{event.folder}</span>
+          {event.durationSeconds != null && (
+            <span className="clip-duration">{formatDuration(event.durationSeconds)}</span>
+          )}
         </div>
         <div className="clip-size">{event.sizeString}</div>
       </div>

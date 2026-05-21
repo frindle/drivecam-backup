@@ -189,6 +189,7 @@ def get_events(
         clips_in_event.sort(key=lambda c: c.timestamp or MIN_TIMESTAMP, reverse=True)
         ts = clips_in_event[0].timestamp
         first = clips_in_event[0]
+        dur = next((c.duration for c in clips_in_event if c.duration is not None), None)
         events.append({
             "eventKey": event_key,
             "timestamp": ts,
@@ -199,6 +200,7 @@ def get_events(
             "cameraCount": len(clips_in_event),
             "totalSize": sum(c.size for c in clips_in_event),
             "sizeString": byte_count_fmt(sum(c.size for c in clips_in_event)),
+            "durationSeconds": dur,
             "clips": clips_in_event,
         })
 

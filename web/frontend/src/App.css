@@ -418,7 +418,7 @@ body {
   margin-bottom: 4px;
 }
 
-.clip-camera, .clip-folder {
+.clip-camera, .clip-folder, .clip-duration {
   font-size: 0.72rem;
   color: var(--text-muted);
   background: var(--surface2);
@@ -1077,6 +1077,16 @@ body {
   white-space: nowrap;
 }
 .header-cap-chip strong { color: var(--accent, #3b82f6); }
+
+.reencode-chip {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 30%, transparent);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
 
 /* Danger buttons */
 .btn-danger-sm {
