@@ -1311,16 +1311,24 @@ function GeneralPanel({ onSettingsChange }) {
     if (!settings) return
     setSaving(true)
     try {
-      const updated = await updateAppSettings({
-        app_name: settings.app_name,
-        reencode_enabled: settings.reencode_enabled,
-      })
-      setSettings(updated)
+      const updated = await updateAppSettings({ app_name: settings.app_name })
+      setSettings(s => ({ ...s, app_name: updated.app_name }))
       setSavedFlag(true)
       setTimeout(() => setSavedFlag(false), 2000)
       if (onSettingsChange) onSettingsChange()
     } catch {}
     setSaving(false)
+  }
+
+  const handleReencodeToggle = async (checked) => {
+    const value = checked ? 'true' : 'false'
+    setSettings(s => ({ ...s, reencode_enabled: value }))
+    try {
+      await updateAppSettings({ reencode_enabled: value })
+      if (onSettingsChange) onSettingsChange()
+    } catch {
+      setSettings(s => ({ ...s, reencode_enabled: checked ? 'false' : 'true' }))
+    }
   }
 
   if (!settings) return <div className="retention-body"><div className="spinner small" /></div>
@@ -1354,7 +1362,7 @@ function GeneralPanel({ onSettingsChange }) {
             <input
               type="checkbox"
               checked={reencodeOn}
-              onChange={e => setSettings(s => ({ ...s, reencode_enabled: e.target.checked ? 'true' : 'false' }))}
+              onChange={e => handleReencodeToggle(e.target.checked)}
             />
             <span className="toggle-track" />
           </label>
