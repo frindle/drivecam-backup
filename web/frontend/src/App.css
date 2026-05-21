@@ -1255,6 +1255,12 @@ body {
 }
 
 /* ─── General Settings Panel ────────────────────────────── */
+.retention-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
 .general-section {
   padding: 16px 0;
   border-bottom: 1px solid var(--border);
