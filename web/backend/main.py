@@ -61,6 +61,7 @@ from .thumbnails import CACHE_DIR, _check_ffmpeg, _get_cache_path, _use_cuda, ff
 SHARE_PATH = os.environ.get("SHARE_PATH", "/share")
 DATA_PATH = os.environ.get("DATA_PATH", "/data")
 STATIC_PATH = os.environ.get("STATIC_PATH", "/app/backend/static")
+INGEST_PATH = os.path.join(DATA_PATH, "ingest")
 
 DATA_PATHS = [p for p in [SHARE_PATH, DATA_PATH] if p]
 
@@ -142,6 +143,78 @@ def _get_filtered_clips(
 _scan_lock = threading.Lock()
 _is_scanning = False
 _last_scan_at: Optional[datetime] = None
+_ingest_last_moved: dict = {}  # vehicle_folder -> datetime
+
+
+def _count_ingest_files(folder: Path) -> int:
+    return sum(1 for p in folder.rglob("*") if p.is_file())
+
+
+def _all_files_stable(folder: Path, min_age_secs: float = 10.0) -> bool:
+    now = time.time()
+    for p in folder.rglob("*"):
+        if p.is_file():
+            try:
+                if now - p.stat().st_mtime < min_age_secs:
+                    return False
+            except OSError:
+                pass
+    return True
+
+
+def _move_ingest_folder(vehicle_folder: str, ingest_subdir: Path) -> int:
+    dest_base = Path(DATA_PATH) / vehicle_folder
+    moved = 0
+    for src in sorted(ingest_subdir.rglob("*")):
+        if not src.is_file():
+            continue
+        rel = src.relative_to(ingest_subdir)
+        dst = dest_base / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.move(str(src), str(dst))
+            moved += 1
+        except Exception as e:
+            print(f"Ingest move error {src} -> {dst}: {e}")
+    for root, dirs, files in os.walk(ingest_subdir, topdown=False):
+        rp = Path(root)
+        if rp == ingest_subdir:
+            continue
+        try:
+            if not any(rp.iterdir()):
+                rp.rmdir()
+        except Exception:
+            pass
+    return moved
+
+
+def _ingest_watcher():
+    while True:
+        time.sleep(30)
+        try:
+            ingest = Path(INGEST_PATH)
+            if not ingest.is_dir():
+                continue
+            total_moved = 0
+            for entry in os.scandir(ingest):
+                if not entry.is_dir():
+                    continue
+                subdir = Path(entry.path)
+                if not _count_ingest_files(subdir):
+                    continue
+                if not _all_files_stable(subdir):
+                    continue
+                moved = _move_ingest_folder(entry.name, subdir)
+                if moved:
+                    _ingest_last_moved[entry.name] = datetime.utcnow()
+                    print(f"Ingest: moved {moved} files from {entry.name} to storage")
+                    total_moved += moved
+            if total_moved:
+                with _scan_lock:
+                    if not _is_scanning:
+                        threading.Thread(target=_refresh_cache_locked, daemon=True).start()
+        except Exception as e:
+            print(f"Ingest watcher error: {e}")
 
 
 def _refresh_cache_locked() -> None:
@@ -1134,6 +1207,33 @@ def _midnight_scheduler():
             print(f"Midnight purge error: {e}")
 
 
+@app.get("/api/ingest/status")
+def ingest_status():
+    ingest = Path(INGEST_PATH)
+    pending = {}
+    subfolders: set = set()
+    if ingest.is_dir():
+        for entry in os.scandir(ingest):
+            if entry.is_dir():
+                subfolders.add(entry.name)
+                count = _count_ingest_files(Path(entry.path))
+                if count:
+                    pending[entry.name] = count
+    clips_result, _, _ = get_all_clips(limit=2000)
+    known_vehicles = {
+        c.relativePath.split("/")[0]
+        for c in clips_result
+        if c.source in (None, "local") and "/" in c.relativePath
+    }
+    all_folders = sorted(subfolders | known_vehicles)
+    return {
+        "ingest_path": INGEST_PATH,
+        "subfolders": all_folders,
+        "pending": pending,
+        "last_moved": {k: v.isoformat() for k, v in _ingest_last_moved.items()},
+    }
+
+
 @app.get("/api/debug/files")
 def debug_files(limit: int = Query(50, ge=1, le=500), folder: Optional[str] = Query(None)):
     """Return actual filenames from disk. Use ?folder=RoadCam to filter."""
@@ -1173,6 +1273,8 @@ else:
 
 @app.on_event("startup")
 def startup():
+    os.makedirs(INGEST_PATH, exist_ok=True)
+    threading.Thread(target=_ingest_watcher, daemon=True).start()
     threading.Thread(target=_midnight_scheduler, daemon=True).start()
     if not get_clip_count():
         threading.Thread(target=_refresh_cache_locked, daemon=True).start()

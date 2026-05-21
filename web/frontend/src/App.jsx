@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, getStorageStats, getVehicleLabels, reassignVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow } from './api'
+import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, getStorageStats, getVehicleLabels, reassignVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus } from './api'
 
 const EVENT_COLORS = {
   driving: '#3b82f6',
@@ -213,8 +213,17 @@ function ImportPanel({ onClose, onImported }) {
   const [reassigning, setReassigning] = useState(false)
   const [stopAfterCurrent, setStopAfterCurrent] = useState(false)
   const stopRef = useRef(false)
+  const [ingestStatus, setIngestStatus] = useState(null)
 
   const vehicleInfo = useMemo(() => detectVehicle(files), [files])
+
+  useEffect(() => {
+    let cancelled = false
+    const load = () => getIngestStatus().then(d => { if (!cancelled) setIngestStatus(d) }).catch(() => {})
+    load()
+    const tid = setInterval(load, 30000)
+    return () => { cancelled = true; clearInterval(tid) }
+  }, [])
 
   useEffect(() => {
     getVehicleLabels().then(data => {
@@ -521,6 +530,35 @@ function ImportPanel({ onClose, onImported }) {
             onChange={handleFirefoxFiles}
             style={{ display: 'none' }}
           />
+
+          {ingestStatus && (
+            <div className="ingest-zone">
+              <div className="ingest-zone-title">— or copy directly to your Drivecam share —</div>
+              <div className="ingest-zone-desc">
+                Place files in the <code>ingest/</code> subfolder on Unraid. The app checks every 30 seconds and auto-imports.
+              </div>
+              {ingestStatus.subfolders.length > 0 ? (
+                <div className="ingest-folders">
+                  {ingestStatus.subfolders.map(f => (
+                    <div key={f} className="ingest-folder-row">
+                      <span className="ingest-folder-icon">📁</span>
+                      <code className="ingest-folder-name">ingest/{f}/</code>
+                      {ingestStatus.pending[f]
+                        ? <span className="ingest-folder-pending">{ingestStatus.pending[f]} files pending…</span>
+                        : ingestStatus.last_moved[f]
+                          ? <span className="ingest-folder-done">✓ last imported {new Date(ingestStatus.last_moved[f] + 'Z').toLocaleString()}</span>
+                          : <span className="ingest-folder-empty">empty</span>
+                      }
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="ingest-zone-desc" style={{ fontStyle: 'italic' }}>
+                  No vehicles found yet. Import a clip first to see your vehicle folder names here.
+                </div>
+              )}
+            </div>
+          )}
 
           {message && <div className="import-message">{message}</div>}
           {error && <div className="import-error">{error}</div>}
