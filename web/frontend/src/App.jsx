@@ -248,48 +248,66 @@ function ImportPanel({ onClose, onImported }) {
     e.target.value = ''
   }
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (!files.length) return
     setUploading(true)
     setProgress(0)
     setError('')
 
-    const safePaths = files.map(({ path, file: fileObj }) => {
-      const safe = path.replace(/^\//, '')
-      return { safe, file: fileObj }
-    })
+    const safePaths = files.map(({ path, file: fileObj }) => ({
+      safe: path.replace(/^\//, ''),
+      file: fileObj,
+    }))
 
-    const formData = new FormData()
-    formData.append('paths', JSON.stringify(safePaths.map(p => p.safe)))
-    for (const { safe, file } of safePaths) {
-      formData.append('files', file, safe)
+    let saved = 0
+    let skipped = 0
+    const errors = []
+
+    const uploadOne = (safe, file, baseProgress) =>
+      new Promise((resolve) => {
+        const formData = new FormData()
+        formData.append('paths', JSON.stringify([safe]))
+        formData.append('files', file, safe)
+
+        const xhr = new XMLHttpRequest()
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            const within = e.loaded / e.total
+            setProgress(Math.round((baseProgress + within / safePaths.length) * 100))
+          }
+        })
+        xhr.addEventListener('load', () => {
+          try {
+            const data = JSON.parse(xhr.responseText)
+            saved += data.saved ?? 0
+            skipped += data.skipped ?? 0
+            if (data.errors?.length) errors.push(...data.errors)
+          } catch {
+            errors.push(`${safe}: unexpected server response`)
+          }
+          resolve()
+        })
+        xhr.addEventListener('error', () => {
+          errors.push(`${safe}: network error`)
+          resolve()
+        })
+        xhr.open('POST', '/api/upload')
+        xhr.send(formData)
+      })
+
+    for (let i = 0; i < safePaths.length; i++) {
+      const { safe, file } = safePaths[i]
+      await uploadOne(safe, file, i / safePaths.length)
+      setProgress(Math.round(((i + 1) / safePaths.length) * 100))
     }
 
-    const xhr = new XMLHttpRequest()
-    xhr.upload.addEventListener('progress', (e) => {
-      if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 95))
-    })
-    xhr.addEventListener('load', () => {
-      try {
-        const data = JSON.parse(xhr.responseText)
-        setProgress(100)
-        let msg = `Imported ${data.saved} file(s)`
-        if (data.skipped > 0) msg += `, ${data.skipped} already imported`
-        if (data.errors?.length) msg += `, ${data.errors.length} failed`
-        setMessage(msg)
-        if (data.errors?.length) setError(data.errors.slice(0, 5).join('\n'))
-        if (data.saved > 0) onImported()
-      } catch {
-        setError('Upload failed: unexpected server response')
-      }
-      setUploading(false)
-    })
-    xhr.addEventListener('error', () => {
-      setError('Upload failed: network error')
-      setUploading(false)
-    })
-    xhr.open('POST', '/api/upload')
-    xhr.send(formData)
+    let msg = `Imported ${saved} file(s)`
+    if (skipped > 0) msg += `, ${skipped} already imported`
+    if (errors.length) msg += `, ${errors.length} failed`
+    setMessage(msg)
+    if (errors.length) setError(errors.slice(0, 5).join('\n'))
+    if (saved > 0) onImported()
+    setUploading(false)
   }
 
   const grouped = {}
