@@ -146,7 +146,8 @@ function ImportPanel({ onClose, onImported }) {
         } else if (entry.kind === 'file') {
           const ext = entry.name.split('.').pop().toLowerCase()
           if (['mp4', 'mov', 'ts', 'avi', 'mkv'].includes(ext)) {
-            found.push({ path: entryPath, handle: entry })
+            const file = await entry.getFile()
+            found.push({ path: entryPath, file })
           }
         }
       }
@@ -213,11 +214,13 @@ function ImportPanel({ onClose, onImported }) {
     }
   }
 
+  const hasDirectoryPicker = typeof window.showDirectoryPicker !== 'undefined'
+
   const selectDir = async () => {
     try {
       setMessage('Scanning for video files…')
       setError('')
-      if (typeof window.showDirectoryPicker !== 'undefined') {
+      if (hasDirectoryPicker) {
         const handle = await window.showDirectoryPicker({ mode: 'read' })
         const found = await scanDirHandle(handle)
         setFiles(found)
@@ -245,7 +248,7 @@ function ImportPanel({ onClose, onImported }) {
     e.target.value = ''
   }
 
-  const handleUpload = async () => {
+  const handleUpload = () => {
     if (!files.length) return
     setUploading(true)
     setProgress(0)
@@ -258,26 +261,35 @@ function ImportPanel({ onClose, onImported }) {
 
     const formData = new FormData()
     formData.append('paths', JSON.stringify(safePaths.map(p => p.safe)))
-    for (const { file } of safePaths) {
-      formData.append('files', file, file.name)
+    for (const { safe, file } of safePaths) {
+      formData.append('files', file, safe)
     }
 
-    try {
-      const res = await fetch('/api/upload', { method: 'POST', body: formData })
-      const data = await res.json()
-      setProgress(100)
-
-      let msg = `Imported ${data.saved} file(s)`
-      if (data.skipped > 0) msg += `, ${data.skipped} already imported`
-      if (data.errors?.length) msg += `, ${data.errors.length} failed`
-      setMessage(msg)
-      if (data.errors?.length) setError(data.errors.slice(0, 5).join('\n'))
-      if (data.saved > 0) onImported()
-    } catch (e) {
-      setError('Upload failed: ' + e.message)
-    }
-
-    setUploading(false)
+    const xhr = new XMLHttpRequest()
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 95))
+    })
+    xhr.addEventListener('load', () => {
+      try {
+        const data = JSON.parse(xhr.responseText)
+        setProgress(100)
+        let msg = `Imported ${data.saved} file(s)`
+        if (data.skipped > 0) msg += `, ${data.skipped} already imported`
+        if (data.errors?.length) msg += `, ${data.errors.length} failed`
+        setMessage(msg)
+        if (data.errors?.length) setError(data.errors.slice(0, 5).join('\n'))
+        if (data.saved > 0) onImported()
+      } catch {
+        setError('Upload failed: unexpected server response')
+      }
+      setUploading(false)
+    })
+    xhr.addEventListener('error', () => {
+      setError('Upload failed: network error')
+      setUploading(false)
+    })
+    xhr.open('POST', '/api/upload')
+    xhr.send(formData)
   }
 
   const grouped = {}
@@ -310,8 +322,14 @@ function ImportPanel({ onClose, onImported }) {
             onDrop={handleDrop}
           >
             <div className="drop-icon">📂</div>
-            <div className="drop-title">Drop your SD Card folder here</div>
-            <div className="drop-hint">Open Finder, navigate to the SD card root, then drag that folder onto this window</div>
+            {hasDirectoryPicker ? (
+              <>
+                <div className="drop-title">Drop your SD Card folder here</div>
+                <div className="drop-hint">Or use the button below to browse</div>
+              </>
+            ) : (
+              <div className="drop-title">Select your SD Card folder</div>
+            )}
             <div className="drop-or">— or —</div>
             <button
               className="btn btn-primary"
