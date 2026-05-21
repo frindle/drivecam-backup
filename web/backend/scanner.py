@@ -200,7 +200,7 @@ def _walk_folder(folder_path: Path, base_path: str):
     for root, _, files in os.walk(folder_path):
         root_path = Path(root)
         for fname in files:
-            if fname.startswith('._'):
+            if fname.startswith('._') or '.tmp265.' in fname:
                 continue
             ext = Path(fname).suffix.lower()
             if ext not in VIDEO_EXTENSIONS:

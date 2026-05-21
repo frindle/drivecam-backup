@@ -1206,6 +1206,7 @@ function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
           </div>
         </div>
 
+        <div className="event-detail-body">
         {multiCam ? (
           <div className="multicam-grid">
             {sortedClips.map(clip => (
@@ -1268,6 +1269,7 @@ function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
           <div className="modal-meta-item"><span className="meta-label">Cameras</span><span className="meta-value">{event.cameraCount}</span></div>
           <div className="modal-meta-item"><span className="meta-label">Folder</span><span className="meta-value">{event.folder}</span></div>
           <div className="modal-meta-item"><span className="meta-label">Size</span><span className="meta-value">{event.sizeString}</span></div>
+        </div>
         </div>
       </div>
     </div>

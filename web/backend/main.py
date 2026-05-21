@@ -1320,6 +1320,9 @@ def delete_vehicle(folder: str):
     delete_vehicle_clips(folder)
     if folder_path and folder_path.exists():
         shutil.rmtree(str(folder_path), ignore_errors=True)
+    ingest_subfolder = Path(INGEST_PATH) / folder
+    if ingest_subfolder.exists():
+        shutil.rmtree(str(ingest_subfolder), ignore_errors=True)
     return {
         "clips_deleted": clips_count,
         "bytes_freed": bytes_freed,

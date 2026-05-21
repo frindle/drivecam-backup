@@ -456,6 +456,15 @@ body {
 /* ─── Event Detail / Multi-Cam ──────────────────────────── */
 .event-detail {
   max-width: 1100px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.event-detail-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .multicam-grid {
