@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, checkImported, getStorageStats, getVehicleLabels, reassignVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus, getAppSettings, updateAppSettings } from './api'
+import { getEvents, getClips, getHealth, triggerScan, clearCache, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, checkImported, getStorageStats, getVehicleLabels, reassignVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus, getAppSettings, updateAppSettings } from './api'
 
 const EVENT_COLORS = {
   driving: '#3b82f6',
@@ -856,6 +856,7 @@ export default function App() {
   const handleRescan = async () => {
     setScanning(true)
     try {
+      await clearCache()
       await triggerScan()
       while (true) {
         await new Promise(r => setTimeout(r, 500))
