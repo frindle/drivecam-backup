@@ -110,9 +110,30 @@ def byte_count_fmt(size: int) -> str:
 
 MIN_TIMESTAMP = datetime(1970, 1, 1)
 
-def _event_key(vehicle: VehicleType, timestamp: Optional[datetime]) -> Optional[str]:
+_CAMERA_SUFFIXES = (
+    "front-center", "rear-center", "side-left", "side-right",
+    "front", "rear", "back", "left", "right", "cabin", "driver", "passenger",
+)
+
+
+def _strip_camera_suffix(stem: str) -> str:
+    """Remove trailing camera name from a filename stem to get a grouping key."""
+    sl = stem.lower()
+    for cam in _CAMERA_SUFFIXES:
+        for sep in ("_", "-"):
+            if sl.endswith(sep + cam):
+                return stem[: -(len(sep) + len(cam))]
+    return stem
+
+
+def _event_key(vehicle: VehicleType, timestamp: Optional[datetime], filename: str = "") -> Optional[str]:
     if timestamp:
         return f"{vehicle.value}:{timestamp.strftime('%Y-%m-%d_%H-%M-%S')}"
+    if filename:
+        stem = Path(filename).stem
+        prefix = _strip_camera_suffix(stem)
+        if prefix and prefix != stem:
+            return f"{vehicle.value}:fn:{prefix}"
     return None
 
 
@@ -216,7 +237,7 @@ def _build_clip(
         eventType=event_type,
         cameraAngle=camera_angle,
         timestamp=timestamp,
-        eventKey=_event_key(vehicle, timestamp),
+        eventKey=_event_key(vehicle, timestamp, filename),
         size=stat.st_size,
         sizeString=byte_count_fmt(stat.st_size),
         hasVideo=True,
@@ -278,7 +299,7 @@ def _scan_smb_share(share_config: dict, clip_folders: Optional[List[str]] = None
                 eventType=event_type,
                 cameraAngle=file_info.get("camera_angle", CameraAngle.UNKNOWN),
                 timestamp=file_info.get("timestamp"),
-                eventKey=_event_key(vehicle, file_info.get("timestamp")),
+                eventKey=_event_key(vehicle, file_info.get("timestamp"), file_info.get("name", "")),
                 size=file_info.get("size", 0),
                 sizeString=byte_count_fmt(file_info.get("size", 0)),
                 hasVideo=True,
@@ -394,7 +415,7 @@ def _scan_nfs_share(share_config: dict, clip_folders: Optional[List[str]] = None
                 eventType=event_type,
                 cameraAngle=file_info.get("camera_angle", CameraAngle.UNKNOWN),
                 timestamp=file_info.get("timestamp"),
-                eventKey=_event_key(vehicle, file_info.get("timestamp")),
+                eventKey=_event_key(vehicle, file_info.get("timestamp"), file_info.get("name", "")),
                 size=file_info.get("size", 0),
                 sizeString=byte_count_fmt(file_info.get("size", 0)),
                 hasVideo=True,
@@ -510,7 +531,7 @@ def _scan_ftp_share(share_config: dict, clip_folders: Optional[List[str]] = None
                 eventType=event_type,
                 cameraAngle=file_info.get("camera_angle", CameraAngle.UNKNOWN),
                 timestamp=file_info.get("timestamp"),
-                eventKey=_event_key(vehicle, file_info.get("timestamp")),
+                eventKey=_event_key(vehicle, file_info.get("timestamp"), file_info.get("name", "")),
                 size=file_info.get("size", 0),
                 sizeString=byte_count_fmt(file_info.get("size", 0)),
                 hasVideo=True,

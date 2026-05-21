@@ -1061,6 +1061,28 @@ def list_vehicle_folders():
     }
 
 
+@app.get("/api/debug/files")
+def debug_files(limit: int = Query(50, ge=1, le=200)):
+    """Return actual filenames from disk to help diagnose filename format issues."""
+    results = []
+    for base in DATA_PATHS:
+        base_path = Path(base)
+        if not base_path.is_dir():
+            continue
+        for root, dirs, files in os.walk(base_path):
+            for fname in files:
+                ext = Path(fname).suffix.lower()
+                if ext in {".mp4", ".mov", ".ts", ".avi", ".mkv"}:
+                    try:
+                        rel = str(Path(root).relative_to(base_path) / fname)
+                    except ValueError:
+                        rel = fname
+                    results.append(rel)
+                    if len(results) >= limit:
+                        return {"count": len(results), "files": results}
+    return {"count": len(results), "files": results}
+
+
 static_dir = Path(STATIC_PATH)
 if static_dir.exists():
     app.mount("/", StaticFiles(directory=STATIC_PATH, html=True), name="static")
