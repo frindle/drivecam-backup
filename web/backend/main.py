@@ -237,6 +237,7 @@ def _refresh_cache_locked() -> None:
         clips = list(all_clips.values())
         upsert_clips(clips)
         set_cached_at(datetime.utcnow())
+        _create_ingest_subfolders()
     finally:
         _is_scanning = False
 
@@ -1283,6 +1284,17 @@ else:
         return {"message": "DriveCam Web Viewer", "docs": "/api/docs"}
 
 
+def _create_ingest_subfolders():
+    clips, _, _ = get_all_clips(limit=2000)
+    folders = {
+        c.relativePath.split("/")[0]
+        for c in clips
+        if c.source in (None, "local") and "/" in c.relativePath
+    }
+    for folder in folders:
+        os.makedirs(os.path.join(INGEST_PATH, folder), exist_ok=True)
+
+
 @app.on_event("startup")
 def startup():
     os.makedirs(INGEST_PATH, exist_ok=True)
@@ -1290,3 +1302,5 @@ def startup():
     threading.Thread(target=_midnight_scheduler, daemon=True).start()
     if not get_clip_count():
         threading.Thread(target=_refresh_cache_locked, daemon=True).start()
+    else:
+        _create_ingest_subfolders()
