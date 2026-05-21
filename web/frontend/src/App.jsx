@@ -65,14 +65,24 @@ function formatDuration(seconds) {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function groupByDate(events) {
+function groupByMonth(events) {
   const groups = {}
   for (const ev of events) {
-    const key = ev.timestamp ? new Date(ev.timestamp).toDateString() : 'Unknown Date'
+    const key = ev.timestamp
+      ? new Date(ev.timestamp).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+      : 'Unknown Date'
     if (!groups[key]) groups[key] = []
     groups[key].push(ev)
   }
   return groups
+}
+
+function formatDayTime(d) {
+  if (!d) return ''
+  const date = new Date(d)
+  const day = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+  const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  return `${day} · ${time}`
 }
 
 function byteCountFmt(bytes) {
@@ -842,7 +852,7 @@ export default function App() {
     }
   }
 
-  const grouped = groupByDate(events)
+  const grouped = groupByMonth(events)
   const eventCount = events.length
   const gearGuardCount = events.filter(e => e.eventType === 'gear_guard').length
 
@@ -941,14 +951,14 @@ export default function App() {
             <button className="btn btn-primary" onClick={handleRescan}>🔄 Rescan</button>
           </div>
         ) : (
-          Object.entries(grouped).map(([date, dateEvents]) => (
-            <section key={date} className="day-group">
+          Object.entries(grouped).map(([month, monthEvents]) => (
+            <section key={month} className="day-group">
               <h2 className="day-header">
-                {formatDate(new Date(date))}
-                <span className="day-count">{dateEvents.length} events</span>
+                {month}
+                <span className="day-count">{monthEvents.length} event{monthEvents.length !== 1 ? 's' : ''}</span>
               </h2>
               <div className="clip-grid">
-                {dateEvents.map(ev => (
+                {monthEvents.map(ev => (
                   <EventCard
                     key={ev.eventKey}
                     event={ev}
@@ -1026,7 +1036,7 @@ function EventCard({ event, onClick }) {
         </div>
       </div>
       <div className="clip-info">
-        <div className="clip-time">{formatTime(event.timestamp)}</div>
+        <div className="clip-time">{formatDayTime(event.timestamp)}</div>
         <div className="clip-meta">
           <span className="clip-camera">{event.cameraCount} cam{event.cameraCount > 1 ? 's' : ''}</span>
           <span className="clip-folder">{event.folder}</span>
