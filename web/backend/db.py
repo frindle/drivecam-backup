@@ -536,3 +536,12 @@ def get_imported_count() -> int:
     with _get_conn() as conn:
         row = conn.execute("SELECT COUNT(*) FROM imported_clips").fetchone()
         return row[0] if row else 0
+
+
+def update_imported_clip_paths(path_updates: list) -> None:
+    with _get_conn() as conn:
+        for old_path, new_path in path_updates:
+            conn.execute(
+                "UPDATE imported_clips SET file_path = ? WHERE file_path = ?",
+                (new_path, old_path),
+            )

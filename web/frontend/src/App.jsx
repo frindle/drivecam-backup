@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, getStorageStats } from './api'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, getStorageStats, getVehicleLabels, reassignVehicle } from './api'
 
 const EVENT_COLORS = {
   driving: '#3b82f6',
@@ -123,15 +123,99 @@ async function getFilesFromDir(dirHandle) {
   return files
 }
 
+const VEHICLE_DEFS = [
+  {
+    patterns: ['teslacam'],
+    canonical: 'TeslaCam',
+    label: 'Tesla',
+    subfolders: ['recentclips', 'savedclips', 'sentryclips'],
+  },
+  {
+    patterns: ['rivian_dashcam', 'rivian', 'dashcam'],
+    canonical: 'rivian_dashcam',
+    label: 'Rivian',
+    subfolders: ['dashcam', 'saved', 'gearguard', 'gear_guard'],
+  },
+]
+
+function detectVehicle(files) {
+  for (const { path } of files.slice(0, 10)) {
+    const top = path.split('/')[0].toLowerCase()
+    for (const def of VEHICLE_DEFS) {
+      if (def.patterns.includes(top)) return { def, existingLabel: null, hasVehicleRoot: true }
+      for (const p of def.patterns) {
+        if (top.startsWith(p + '_')) {
+          return { def, existingLabel: path.split('/')[0].slice(p.length + 1), hasVehicleRoot: true }
+        }
+      }
+    }
+    for (const def of VEHICLE_DEFS) {
+      if (def.subfolders.includes(top)) return { def, existingLabel: null, hasVehicleRoot: false }
+    }
+  }
+  return null
+}
+
+function applyVehicleLabel(files, vehicleInfo, label) {
+  if (!vehicleInfo || !label.trim()) return files
+  const root = `${vehicleInfo.def.canonical}_${label.trim()}`
+  return files.map(({ path, file }) => ({
+    path: vehicleInfo.hasVehicleRoot
+      ? [root, ...path.split('/').slice(1)].join('/')
+      : `${root}/${path}`,
+    file,
+  }))
+}
+
+function formatSpeed(bps) {
+  if (bps >= 1024 * 1024) return `${(bps / (1024 * 1024)).toFixed(1)} MB/s`
+  if (bps >= 1024) return `${(bps / 1024).toFixed(0)} KB/s`
+  return `${Math.round(bps)} B/s`
+}
+
+function formatTimeRemaining(secs) {
+  if (!secs || secs < 1) return ''
+  if (secs < 60) return `~${Math.round(secs)}s left`
+  if (secs < 3600) return `~${Math.round(secs / 60)}m left`
+  return `~${(secs / 3600).toFixed(1)}h left`
+}
+
 function ImportPanel({ onClose, onImported }) {
   const fileInputRef = useRef(null)
-  const dropZoneRef = useRef(null)
   const [isDragging, setIsDragging] = useState(false)
   const [files, setFiles] = useState([])
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [vehicleLabel, setVehicleLabel] = useState('')
+  const [vehicleSuggestions, setVehicleSuggestions] = useState([])
+  const [uploadStats, setUploadStats] = useState(null)
+  const [reassignOffer, setReassignOffer] = useState(null)
+  const [reassigning, setReassigning] = useState(false)
+
+  const vehicleInfo = useMemo(() => detectVehicle(files), [files])
+
+  useEffect(() => {
+    getVehicleLabels().then(data => {
+      const labels = new Set()
+      for (const folder of data.folders || []) {
+        const fl = folder.toLowerCase()
+        for (const def of VEHICLE_DEFS) {
+          for (const p of def.patterns) {
+            if (fl.startsWith(p + '_') && folder.length > p.length + 1) {
+              labels.add(folder.slice(p.length + 1))
+            }
+          }
+        }
+      }
+      setVehicleSuggestions([...labels])
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (vehicleInfo?.existingLabel && !vehicleLabel) setVehicleLabel(vehicleInfo.existingLabel)
+  }, [vehicleInfo])
 
   const scanDirHandle = async (dirHandle) => {
     const found = []
@@ -249,34 +333,48 @@ function ImportPanel({ onClose, onImported }) {
   }
 
   const handleUpload = async () => {
-    if (!files.length) return
+    const filesToUpload = applyVehicleLabel(files, vehicleInfo, vehicleLabel)
+    if (!filesToUpload.length) return
     setUploading(true)
     setProgress(0)
     setError('')
+    setUploadStats(null)
+    setReassignOffer(null)
 
-    const safePaths = files.map(({ path, file: fileObj }) => ({
+    const safePaths = filesToUpload.map(({ path, file: fileObj }) => ({
       safe: path.replace(/^\//, ''),
       file: fileObj,
     }))
 
-    let saved = 0
-    let skipped = 0
+    const totalBytes = safePaths.reduce((sum, { file }) => sum + (file?.size || 0), 0)
+    const startTime = Date.now()
+    let bytesCompleted = 0
+    let saved = 0, skipped = 0
     const errors = []
 
-    const uploadOne = (safe, file, baseProgress) =>
+    const uploadOne = (safe, file, idx) =>
       new Promise((resolve) => {
         const formData = new FormData()
         formData.append('paths', JSON.stringify([safe]))
         formData.append('files', file, safe)
-
         const xhr = new XMLHttpRequest()
         xhr.upload.addEventListener('progress', (e) => {
           if (e.lengthComputable) {
-            const within = e.loaded / e.total
-            setProgress(Math.round((baseProgress + within / safePaths.length) * 100))
+            const totalDone = bytesCompleted + e.loaded
+            const pct = totalBytes > 0
+              ? Math.round((totalDone / totalBytes) * 100)
+              : Math.round(((idx + e.loaded / e.total) / safePaths.length) * 100)
+            setProgress(Math.min(pct, 99))
+            const elapsed = (Date.now() - startTime) / 1000
+            if (elapsed > 0.5 && totalDone > 0) {
+              const speed = totalDone / elapsed
+              const remaining = totalBytes > 0 ? (totalBytes - totalDone) / speed : null
+              setUploadStats({ speed, remaining })
+            }
           }
         })
         xhr.addEventListener('load', () => {
+          bytesCompleted += file?.size || 0
           try {
             const data = JSON.parse(xhr.responseText)
             saved += data.saved ?? 0
@@ -288,6 +386,7 @@ function ImportPanel({ onClose, onImported }) {
           resolve()
         })
         xhr.addEventListener('error', () => {
+          bytesCompleted += file?.size || 0
           errors.push(`${safe}: network error`)
           resolve()
         })
@@ -296,18 +395,43 @@ function ImportPanel({ onClose, onImported }) {
       })
 
     for (let i = 0; i < safePaths.length; i++) {
-      const { safe, file } = safePaths[i]
-      await uploadOne(safe, file, i / safePaths.length)
+      await uploadOne(safePaths[i].safe, safePaths[i].file, i)
       setProgress(Math.round(((i + 1) / safePaths.length) * 100))
     }
 
+    setProgress(100)
+    setUploadStats(null)
     let msg = `Imported ${saved} file(s)`
     if (skipped > 0) msg += `, ${skipped} already imported`
     if (errors.length) msg += `, ${errors.length} failed`
     setMessage(msg)
     if (errors.length) setError(errors.slice(0, 5).join('\n'))
-    if (saved > 0) onImported()
+    if (saved > 0) {
+      onImported()
+      if (vehicleInfo && vehicleLabel.trim()) {
+        try {
+          const data = await getVehicleLabels()
+          const unlabeled = vehicleInfo.def.canonical
+          if ((data.folders || []).includes(unlabeled)) {
+            setReassignOffer({ fromFolder: unlabeled, toFolder: `${unlabeled}_${vehicleLabel.trim()}` })
+          }
+        } catch {}
+      }
+    }
     setUploading(false)
+  }
+
+  const handleReassign = async () => {
+    if (!reassignOffer) return
+    setReassigning(true)
+    try {
+      const result = await reassignVehicle(reassignOffer.fromFolder, reassignOffer.toFolder)
+      setMessage(prev => `${prev} · Moved ${result.moved} unlabeled clips to ${reassignOffer.toFolder}`)
+      setReassignOffer(null)
+    } catch (e) {
+      setError('Move failed: ' + e.message)
+    }
+    setReassigning(false)
   }
 
   const grouped = {}
@@ -359,9 +483,8 @@ function ImportPanel({ onClose, onImported }) {
           </div>
 
           <input
-            ref={fileInputRef}
+            ref={el => { fileInputRef.current = el; if (el) el.webkitdirectory = true }}
             type="file"
-            webkitdirectory="webkitdirectory"
             multiple
             onChange={handleFirefoxFiles}
             style={{ display: 'none' }}
@@ -372,6 +495,32 @@ function ImportPanel({ onClose, onImported }) {
 
           {files.length > 0 && (
             <>
+              {vehicleInfo && (
+                <div className="vehicle-section">
+                  <div className="vehicle-detected-badge">{vehicleInfo.def.label} detected</div>
+                  <div className="vehicle-label-row">
+                    <label className="vehicle-label-label">Vehicle name</label>
+                    <input
+                      type="text"
+                      className="vehicle-label-input"
+                      placeholder={`e.g. My ${vehicleInfo.def.label}`}
+                      value={vehicleLabel}
+                      onChange={e => setVehicleLabel(e.target.value)}
+                      list="vehicle-suggestions"
+                      disabled={uploading}
+                    />
+                    <datalist id="vehicle-suggestions">
+                      {vehicleSuggestions.map(s => <option key={s} value={s} />)}
+                    </datalist>
+                  </div>
+                  {vehicleLabel.trim() && (
+                    <div className="vehicle-preview">
+                      Saves to: <code>{vehicleInfo.def.canonical}_{vehicleLabel.trim()}/</code>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="import-summary">
                 {Object.entries(grouped).map(([folder, fls]) => (
                   <div key={folder} className="import-folder">
@@ -386,12 +535,34 @@ function ImportPanel({ onClose, onImported }) {
                   <div className="progress-bar">
                     <div className="progress-fill" style={{ width: `${progress}%` }} />
                   </div>
-                  <span>{progress}%</span>
+                  <div className="progress-meta">
+                    <span>{progress}%</span>
+                    {uploadStats && (
+                      <>
+                        <span className="progress-speed">{formatSpeed(uploadStats.speed)}</span>
+                        {formatTimeRemaining(uploadStats.remaining) && (
+                          <span className="progress-remaining">{formatTimeRemaining(uploadStats.remaining)}</span>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <button className="btn btn-primary" onClick={handleUpload}>
                   ▶ Import {files.length} File{files.length !== 1 ? 's' : ''}
                 </button>
+              )}
+
+              {reassignOffer && (
+                <div className="reassign-offer">
+                  <span>Unlabeled {vehicleInfo?.def.label} clips found. Move to <code>{reassignOffer.toFolder}</code>?</span>
+                  <div className="reassign-actions">
+                    <button className="btn btn-primary" onClick={handleReassign} disabled={reassigning}>
+                      {reassigning ? 'Moving…' : 'Move'}
+                    </button>
+                    <button className="btn btn-clear" onClick={() => setReassignOffer(null)}>Skip</button>
+                  </div>
+                </div>
               )}
             </>
           )}

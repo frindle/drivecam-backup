@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -35,13 +36,14 @@ from .db import (
     test_cloud_provider as db_test_cloud_provider,
     is_clip_imported,
     mark_clips_imported,
+    update_imported_clip_paths,
 )
 from .models import (
     Clip, ClipListResponse, EventSummary, EventListResponse,
     HealthResponse, ScanResponse,
     RemoteShareCreate, RemoteShareUpdate, RemoteShareResponse, RemoteShareTestResponse,
     CloudProviderCreate, CloudProviderUpdate, CloudProviderResponse, CloudProviderType,
-    UploadResponse, StorageStatsResponse,
+    UploadResponse, StorageStatsResponse, ReassignRequest,
 )
 from .scanner import scan_folder, scan_remote_share, clip_id, byte_count_fmt
 from .services import get_cloud_client
@@ -928,6 +930,47 @@ def storage_stats():
         vehicles=vehicle_info,
         by_vehicle=by_vehicle,
     )
+
+
+@app.get("/api/vehicles")
+def list_vehicle_folders_from_clips():
+    clips, _, _ = get_all_clips(limit=10000)
+    folders = sorted({
+        clip.relativePath.split("/")[0]
+        for clip in clips
+        if clip.relativePath and clip.source in (None, "local") and clip.relativePath.split("/")[0]
+    })
+    return {"folders": folders}
+
+
+@app.post("/api/vehicles/reassign")
+def reassign_vehicle(body: ReassignRequest):
+    from_folder = body.from_folder.strip("/")
+    to_folder = body.to_folder.strip("/")
+    from_path = Path(DATA_PATH) / from_folder
+    to_path = Path(DATA_PATH) / to_folder
+    if not from_path.exists():
+        raise HTTPException(status_code=404, detail=f"Source folder not found: {from_folder}")
+    moved, errors = [], []
+    for src in from_path.rglob("*"):
+        if src.is_file():
+            rel = src.relative_to(from_path)
+            dst = to_path / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.move(str(src), str(dst))
+                moved.append((str(Path(from_folder) / rel), str(Path(to_folder) / rel)))
+            except Exception as e:
+                errors.append(str(e))
+    try:
+        if from_path.exists() and not any(from_path.iterdir()):
+            from_path.rmdir()
+    except Exception:
+        pass
+    if moved:
+        update_imported_clip_paths(moved)
+    trigger_scan()
+    return {"moved": len(moved), "errors": errors}
 
 
 @app.get("/api/vehicles/folders")

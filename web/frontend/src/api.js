@@ -157,3 +157,17 @@ export async function getStorageStats() {
 export async function getVehicleFolders() {
   return apiFetch('/vehicles/folders');
 }
+
+export async function getVehicleLabels() {
+  return apiFetch('/vehicles');
+}
+
+export async function reassignVehicle(fromFolder, toFolder) {
+  const res = await fetch(`${BASE}/vehicles/reassign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from_folder: fromFolder, to_folder: toFolder }),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}

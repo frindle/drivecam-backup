@@ -1085,6 +1085,22 @@ body {
 .import-progress { display: flex; flex-direction: column; gap: 0.5rem; }
 .progress-bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.2s; }
+.progress-meta { display: flex; align-items: center; gap: 0.75rem; font-size: 0.8rem; color: var(--text-secondary); }
+.progress-speed { font-variant-numeric: tabular-nums; }
+.progress-remaining { color: var(--text-muted); }
+
+.vehicle-section { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; background: var(--surface-alt, rgba(255,255,255,0.04)); border: 1px solid var(--border); border-radius: 8px; }
+.vehicle-detected-badge { font-size: 0.75rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; }
+.vehicle-label-row { display: flex; align-items: center; gap: 0.5rem; }
+.vehicle-label-label { font-size: 0.8rem; color: var(--text-secondary); white-space: nowrap; }
+.vehicle-label-input { flex: 1; padding: 0.35rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 0.875rem; min-width: 0; }
+.vehicle-label-input:focus { outline: none; border-color: var(--accent); }
+.vehicle-preview { font-size: 0.75rem; color: var(--text-muted); }
+.vehicle-preview code { color: var(--text-secondary); background: var(--border); padding: 0 0.3em; border-radius: 3px; }
+
+.reassign-offer { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3); border-radius: 8px; font-size: 0.875rem; }
+.reassign-offer code { background: rgba(245,158,11,0.15); padding: 0 0.3em; border-radius: 3px; font-size: 0.8rem; }
+.reassign-actions { display: flex; gap: 0.5rem; }
 
 .import-dropzone {
   border: 2px dashed var(--border);

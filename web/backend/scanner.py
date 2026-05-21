@@ -41,12 +41,22 @@ RIVIAN_FILENAME_RE = re.compile(
 )
 
 
+TESLA_ROOTS = {"teslacam"}
+RIVIAN_ROOTS = {"rivian_dashcam", "rivian", "dashcam"}
+
+
 def detect_vehicle_from_folder(folder_name: str) -> VehicleType:
     fl = folder_name.lower()
-    if fl == "teslacam":
+    if fl in TESLA_ROOTS:
         return VehicleType.TESLA
-    if fl in ("rivian_dashcam", "rivian", "dashcam"):
+    if fl in RIVIAN_ROOTS:
         return VehicleType.RIVIAN
+    for root in TESLA_ROOTS:
+        if fl.startswith(root + "_"):
+            return VehicleType.TESLA
+    for root in RIVIAN_ROOTS:
+        if fl.startswith(root + "_"):
+            return VehicleType.RIVIAN
     return VehicleType.UNKNOWN
 
 

@@ -5,7 +5,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - /mnt/user/data/Media/Drivecam:/data:ro
+      - /mnt/user/data/Media/Drivecam:/data
       - drivecam-cache:/tmp
     environment:
       - DATA_PATH=/data

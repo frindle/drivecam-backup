@@ -218,3 +218,8 @@ class StorageStatsResponse(BaseModel):
     hours_of_footage: float
     vehicles: dict
     by_vehicle: dict
+
+
+class ReassignRequest(BaseModel):
+    from_folder: str
+    to_folder: str
