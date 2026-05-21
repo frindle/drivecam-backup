@@ -112,6 +112,7 @@ function StorageCalculator({ stats, onImportClick }) {
     { label: '256 GB', gb: 256 },
     { label: '512 GB', gb: 512 },
     { label: '1 TB', gb: 1024 },
+    { label: '2 TB', gb: 2048 },
   ]
 
   return (
