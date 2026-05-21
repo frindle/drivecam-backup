@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, getStorageStats, getVehicleLabels, reassignVehicle } from './api'
+import { getEvents, getClips, getHealth, triggerScan, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, getStorageStats, getVehicleLabels, reassignVehicle, deleteClip, deleteEvent } from './api'
 
 const EVENT_COLORS = {
   driving: '#3b82f6',
@@ -28,6 +28,24 @@ const PROTOCOL_LABELS = {
   smb: 'SMB',
   ftp: 'FTP',
   nfs: 'NFS',
+}
+
+const VEHICLE_PREFIXES = [
+  { prefix: 'teslacam_', brand: 'Tesla' },
+  { prefix: 'teslacam', brand: 'Tesla' },
+  { prefix: 'rivian_dashcam_', brand: 'Rivian' },
+  { prefix: 'rivian_dashcam', brand: 'Rivian' },
+]
+
+function formatVehicleFolder(folder) {
+  const fl = folder.toLowerCase()
+  for (const { prefix, brand } of VEHICLE_PREFIXES) {
+    if (fl === prefix.replace(/_$/, '')) return brand
+    if (fl.startsWith(prefix) && folder.length > prefix.length) {
+      return `${brand}: ${folder.slice(prefix.length)}`
+    }
+  }
+  return folder
 }
 
 function formatDate(d) {
@@ -597,12 +615,14 @@ function ImportPanel({ onClose, onImported }) {
 export default function App() {
   const [events, setEvents] = useState([])
   const [filterVehicle, setFilterVehicle] = useState('')
+  const [filterVehicleFolder, setFilterVehicleFolder] = useState('')
   const [filterEvent, setFilterEvent] = useState('')
   const [filterFolder, setFilterFolder] = useState('')
   const [filterCamera, setFilterCamera] = useState('')
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterDateTo, setFilterDateTo] = useState('')
   const [vehicles, setVehicles] = useState([])
+  const [vehicleFolders, setVehicleFolders] = useState([])
   const [folders, setFolders] = useState([])
   const [eventTypes, setEventTypes] = useState([])
   const [cameras, setCameras] = useState([])
@@ -630,6 +650,7 @@ export default function App() {
     try {
       const data = await getEvents({
         vehicle: filterVehicle || undefined,
+        vehicle_folder: filterVehicleFolder || undefined,
         event_type: filterEvent || undefined,
         folder: filterFolder || undefined,
         camera: filterCamera || undefined,
@@ -640,6 +661,7 @@ export default function App() {
       setHasMore(data.hasMore)
       setOldestTimestamp(data.oldestTimestamp)
       setVehicles(data.vehicles)
+      setVehicleFolders(data.vehicleFolders || [])
       setFolders(data.folders)
       setEventTypes(data.eventTypes)
       setCameras(data.cameras || [])
@@ -648,7 +670,7 @@ export default function App() {
     } finally {
       setLoading(false)
     }
-  }, [filterVehicle, filterEvent, filterFolder, filterCamera, filterDateFrom, filterDateTo])
+  }, [filterVehicle, filterVehicleFolder, filterEvent, filterFolder, filterCamera, filterDateFrom, filterDateTo])
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || !oldestTimestamp) return
@@ -656,6 +678,7 @@ export default function App() {
     try {
       const data = await getEvents({
         vehicle: filterVehicle || undefined,
+        vehicle_folder: filterVehicleFolder || undefined,
         event_type: filterEvent || undefined,
         folder: filterFolder || undefined,
         camera: filterCamera || undefined,
@@ -671,7 +694,7 @@ export default function App() {
     } finally {
       setLoadingMore(false)
     }
-  }, [loadingMore, hasMore, oldestTimestamp, filterVehicle, filterEvent, filterFolder, filterCamera, filterDateFrom, filterDateTo])
+  }, [loadingMore, hasMore, oldestTimestamp, filterVehicle, filterVehicleFolder, filterEvent, filterFolder, filterCamera, filterDateFrom, filterDateTo])
 
   const loadHealth = useCallback(async () => {
     try {
@@ -814,9 +837,12 @@ export default function App() {
 
       <div className="filter-bar">
         <div className="filter-row">
-          <select value={filterVehicle} onChange={e => setFilterVehicle(e.target.value)} className="filter-select">
+          <select value={filterVehicleFolder} onChange={e => setFilterVehicleFolder(e.target.value)} className="filter-select">
             <option value="">All Vehicles</option>
-            {vehicles.map(v => <option key={v} value={v}>{v.charAt(0).toUpperCase() + v.slice(1)}</option>)}
+            {vehicleFolders.map(f => {
+              const label = formatVehicleFolder(f)
+              return <option key={f} value={f}>{label}</option>
+            })}
           </select>
 
           <select value={filterEvent} onChange={e => setFilterEvent(e.target.value)} className="filter-select">
@@ -838,9 +864,9 @@ export default function App() {
           <span className="date-sep">→</span>
           <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} className="filter-input" />
 
-          {(filterVehicle || filterEvent || filterFolder || filterCamera || filterDateFrom || filterDateTo) && (
+          {(filterVehicleFolder || filterEvent || filterFolder || filterCamera || filterDateFrom || filterDateTo) && (
             <button className="btn btn-clear" onClick={() => {
-              setFilterVehicle(''); setFilterEvent(''); setFilterFolder('')
+              setFilterVehicleFolder(''); setFilterEvent(''); setFilterFolder('')
               setFilterCamera(''); setFilterDateFrom(''); setFilterDateTo('')
             }}>✕ Clear</button>
           )}
@@ -893,6 +919,10 @@ export default function App() {
           allEvents={events}
           onClose={() => setActiveEvent(null)}
           onNavigate={setActiveEvent}
+          onDeleted={() => {
+            setActiveEvent(null)
+            loadEvents()
+          }}
         />
       )}
 
@@ -952,15 +982,47 @@ function EventCard({ event, onClick }) {
   )
 }
 
-function EventDetail({ event, allEvents, onClose, onNavigate }) {
+function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
   const videosRef = useRef({})
   const [multiCam, setMultiCam] = useState(false)
   const [activeCamera, setActiveCamera] = useState(event.clips?.[0]?.cameraAngle || 'front')
   const [playing, setPlaying] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [selectedClips, setSelectedClips] = useState(new Set())
+  const [selectMode, setSelectMode] = useState(false)
   const currentIdx = allEvents.findIndex(e => e.eventKey === event.eventKey)
   const hasPrev = currentIdx > 0
   const hasNext = currentIdx < allEvents.length - 1
   const color = EVENT_COLORS[event.eventType] || EVENT_COLORS.unknown
+
+  const handleDeleteSelected = async () => {
+    if (selectedClips.size === 0) return
+    if (!confirm(`Delete ${selectedClips.size} clip(s)?`)) return
+    setDeleting(true)
+    try {
+      for (const clipId of selectedClips) {
+        await deleteClip(clipId)
+      }
+      onDeleted()
+    } catch (e) {
+      alert('Delete failed: ' + e.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const handleDeleteEvent = async () => {
+    if (!confirm(`Delete all ${clips.length} clip(s) in this event?`)) return
+    setDeleting(true)
+    try {
+      await deleteEvent(event.eventKey)
+      onDeleted()
+    } catch (e) {
+      alert('Delete failed: ' + e.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const clips = event.clips || []
   const sortedClips = [...clips].sort((a, b) => {
@@ -1034,6 +1096,33 @@ function EventDetail({ event, allEvents, onClose, onNavigate }) {
             <button className="btn btn-rescan" onClick={() => setMultiCam(m => !m)} title={multiCam ? 'Single cam view' : 'Multi-cam view'}>
               {multiCam ? '📺 Single' : '🎬 Multi'}
             </button>
+            {selectMode ? (
+              <>
+                <button
+                  className="btn btn-danger"
+                  onClick={handleDeleteSelected}
+                  disabled={deleting || selectedClips.size === 0}
+                  title="Delete selected clips"
+                >
+                  {deleting ? '⏳' : '🗑️'} {selectedClips.size > 0 ? `Delete (${selectedClips.size})` : 'Select clips'}
+                </button>
+                <button className="btn btn-clear" onClick={() => { setSelectMode(false); setSelectedClips(new Set()) }}>Cancel</button>
+              </>
+            ) : (
+              <>
+                <button className="btn btn-share-action" onClick={() => setSelectMode(true)} title="Select clips to delete">
+                  ☑️ Select
+                </button>
+                <button
+                  className="btn btn-danger"
+                  onClick={handleDeleteEvent}
+                  disabled={deleting}
+                  title="Delete all clips in this event"
+                >
+                  {deleting ? '⏳' : '🗑️'} Delete All
+                </button>
+              </>
+            )}
             <button className="btn btn-nav btn-close" onClick={onClose}>✕</button>
           </div>
         </div>
@@ -1079,10 +1168,20 @@ function EventDetail({ event, allEvents, onClose, onNavigate }) {
             {sortedClips.map(clip => (
               <button
                 key={clip.id}
-                className={`camera-tab ${activeCamera === clip.cameraAngle ? 'active' : ''}`}
-                onClick={() => setActiveCamera(clip.cameraAngle)}
+                className={`camera-tab ${activeCamera === clip.cameraAngle && !selectMode ? 'active' : ''} ${selectMode && selectedClips.has(clip.id) ? 'selected' : ''}`}
+                onClick={() => {
+                  if (selectMode) {
+                    setSelectedClips(prev => {
+                      const next = new Set(prev)
+                      next.has(clip.id) ? next.delete(clip.id) : next.add(clip.id)
+                      return next
+                    })
+                  } else {
+                    setActiveCamera(clip.cameraAngle)
+                  }
+                }}
               >
-                {CAMERA_LABELS[clip.cameraAngle] || clip.cameraAngle}
+                {selectMode && selectedClips.has(clip.id) ? '✓ ' : ''}{CAMERA_LABELS[clip.cameraAngle] || clip.cameraAngle}
               </button>
             ))}
           </div>

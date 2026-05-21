@@ -77,6 +77,7 @@ class EventListResponse(BaseModel):
     events: List[EventSummary]
     total: int
     vehicles: List[str]
+    vehicleFolders: List[str] = []
     folders: List[str]
     eventTypes: List[str]
     cameras: List[str]

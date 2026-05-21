@@ -31,9 +31,8 @@ TESLA_FILENAME_RE = re.compile(
 )
 
 RIVIAN_FILENAME_RE = re.compile(
-    r"^(?:(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2}))"
-    r"(?:[_-](front|back|left|right|cabin|driver|passenger))?"
-    r"(?:[_-](sentry|gearguard|guard|event))?"
+    r"^(\d{2})_(\d{2})_(\d{2})_(\d{2})(\d{2})(\d{2})"
+    r"(?:[_-](front-center|rear-center|side-left|side-right|front|rear|back|left|right|cabin|driver|passenger))?"
     r"\.(mp4|mov|ts|avi|mkv)$",
     re.IGNORECASE,
 )
@@ -70,10 +69,9 @@ def parse_timestamp(filename: str, folder_name: str, vehicle: VehicleType) -> Op
 
     if m := RIVIAN_FILENAME_RE.match(filename):
         try:
-            year, month, day, hour, minute, second = (
-                int(m.group(1)), int(m.group(2)), int(m.group(3)),
-                int(m.group(4)), int(m.group(5)), int(m.group(6))
-            )
+            month, day = int(m.group(1)), int(m.group(2))
+            year = 2000 + int(m.group(3))
+            hour, minute, second = int(m.group(4)), int(m.group(5)), int(m.group(6))
             return datetime(year, month, day, hour, minute, second)
         except (ValueError, TypeError):
             pass
@@ -90,7 +88,7 @@ def parse_camera_angle(filename: str, vehicle: VehicleType) -> CameraAngle:
         if "cabin" in fn: return CameraAngle.CABIN
     if vehicle == VehicleType.RIVIAN:
         if "front" in fn: return CameraAngle.FRONT
-        if "back" in fn or "rear" in fn: return CameraAngle.BACK
+        if "rear" in fn or "back" in fn: return CameraAngle.BACK
         if "left" in fn: return CameraAngle.LEFT
         if "right" in fn: return CameraAngle.RIGHT
         if "cabin" in fn or "interior" in fn or "driver" in fn: return CameraAngle.CABIN

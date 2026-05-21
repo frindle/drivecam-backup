@@ -24,9 +24,10 @@ export async function getClips({ vehicle, event_type, folder, camera, date_from,
   return apiFetch(`/clips${qs ? '?' + qs : ''}`);
 }
 
-export async function getEvents({ vehicle, event_type, folder, camera, date_from, date_to, before_timestamp, limit } = {}) {
+export async function getEvents({ vehicle, vehicle_folder, event_type, folder, camera, date_from, date_to, before_timestamp, limit } = {}) {
   const params = new URLSearchParams();
   if (vehicle) params.set('vehicle', vehicle);
+  if (vehicle_folder) params.set('vehicle_folder', vehicle_folder);
   if (event_type) params.set('event_type', event_type);
   if (folder) params.set('folder', folder);
   if (camera) params.set('camera', camera);
@@ -39,7 +40,9 @@ export async function getEvents({ vehicle, event_type, folder, camera, date_from
 }
 
 export async function triggerScan() {
-  return apiFetch('/scan');
+  const res = await fetch(`${BASE}/scan`, { method: 'POST' });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
 }
 
 export async function clearCache() {
@@ -168,6 +171,18 @@ export async function reassignVehicle(fromFolder, toFolder) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ from_folder: fromFolder, to_folder: toFolder }),
   });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export async function deleteClip(clipId) {
+  const res = await fetch(`${BASE}/clips/${encodeURIComponent(clipId)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export async function deleteEvent(eventKey) {
+  const res = await fetch(`${BASE}/events/${encodeURIComponent(eventKey)}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }

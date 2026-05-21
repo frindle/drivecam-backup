@@ -216,6 +216,16 @@ body {
   font-size: 0.75rem;
 }
 
+.btn-danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.22);
+}
+
 /* ─── Filter Bar ─────────────────────────────────────── */
 
 .filter-bar {
@@ -508,6 +518,12 @@ body {
   border-color: var(--accent);
   color: #fff;
   font-weight: 600;
+}
+
+.camera-tab.selected {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+  color: #ef4444;
 }
 
 .loading-more {

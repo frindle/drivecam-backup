@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -37,6 +37,8 @@ from .db import (
     is_clip_imported,
     mark_clips_imported,
     update_imported_clip_paths,
+    delete_clip_from_db,
+    delete_clips_by_event_key,
 )
 from .models import (
     Clip, ClipListResponse, EventSummary, EventListResponse,
@@ -50,7 +52,7 @@ from .services import get_cloud_client
 from .services.smb_client import SMBClient
 from .services.ftp_client import FTPClient
 from .services.nfs_client import NFSClient
-from .thumbnails import CACHE_DIR, _check_ffmpeg, _use_cuda, ffmpeg_available, generate_thumbnail, get_duration
+from .thumbnails import CACHE_DIR, _check_ffmpeg, _get_cache_path, _use_cuda, ffmpeg_available, generate_thumbnail, get_duration
 
 SHARE_PATH = os.environ.get("SHARE_PATH", "/share")
 DATA_PATH = os.environ.get("DATA_PATH", "/data")
@@ -70,12 +72,30 @@ app.add_middleware(
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 
+MIME_TYPES = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".ts": "video/mp2t",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+}
+
+
+def _get_mime_type(filename: str) -> str:
+    return MIME_TYPES.get(Path(filename).suffix.lower(), "video/mp4")
+
+
 def _build_urls(clip: Clip) -> Clip:
     if clip.source and clip.source not in ("local", "smb", "ftp", "nfs"):
         return clip
-    clip_id_enc = clip.id
-    clip.downloadUrl = f"/api/shares/{clip.share_id}/clips/{clip_id_enc}/video"
-    clip.thumbnailUrl = f"/api/shares/{clip.share_id}/clips/{clip_id_enc}/thumbnail"
+    if clip.source in (None, "local"):
+        rel = urllib.parse.quote(clip.relativePath, safe="/")
+        clip.downloadUrl = f"/api/clips/{rel}/video"
+        clip.thumbnailUrl = f"/api/clips/{rel}/thumbnail"
+    else:
+        clip_id_enc = clip.id
+        clip.downloadUrl = f"/api/shares/{clip.share_id}/clips/{clip_id_enc}/video"
+        clip.thumbnailUrl = f"/api/shares/{clip.share_id}/clips/{clip_id_enc}/thumbnail"
     return clip
 
 
@@ -203,6 +223,7 @@ def list_clips(
 @app.get("/api/events", response_model=EventListResponse)
 def list_events(
     vehicle: Optional[str] = Query(None),
+    vehicle_folder: Optional[str] = Query(None),
     event_type: Optional[str] = Query(None),
     folder: Optional[str] = Query(None),
     camera: Optional[str] = Query(None),
@@ -222,8 +243,21 @@ def list_events(
         date_to=date_to,
     )
 
+    if vehicle_folder and vehicle_folder != "all":
+        prefix = vehicle_folder + "/"
+        raw_events = [
+            e for e in raw_events
+            if any(c.relativePath.startswith(prefix) or c.relativePath == vehicle_folder
+                   for c in e["clips"])
+        ]
+
     all_clips, _, _ = get_all_clips()
     vehicles = sorted(set(c.vehicle.value for c in all_clips))
+    vehicle_folders = sorted({
+        c.relativePath.split("/")[0]
+        for c in all_clips
+        if c.source in (None, "local") and "/" in c.relativePath
+    })
     folders = sorted(set(c.folder for c in all_clips))
     event_types = sorted(set(c.eventType.value for c in all_clips))
     cameras = sorted(set(c.cameraAngle.value for c in all_clips))
@@ -250,6 +284,7 @@ def list_events(
         events=event_summaries,
         total=len(event_summaries),
         vehicles=vehicles,
+        vehicleFolders=vehicle_folders,
         folders=folders,
         eventTypes=event_types,
         cameras=cameras,
@@ -309,7 +344,7 @@ def get_thumbnail(path: str):
 
 
 @app.get("/api/clips/{path:path}/video")
-def get_video(path: str, range: Optional[str] = Query(None)):
+def get_video(path: str, request: Request):
     relative_path = urllib.parse.unquote(path)
     full_path = _resolve_clip_path(relative_path)
 
@@ -317,16 +352,16 @@ def get_video(path: str, range: Optional[str] = Query(None)):
         raise HTTPException(status_code=404, detail="File not found")
 
     file_size = os.path.getsize(full_path)
+    mime = _get_mime_type(full_path)
+    range_header = request.headers.get("range") or request.headers.get("Range")
 
-    if range:
+    if range_header:
         try:
-            start, end = range.replace("bytes=", "").split("-")
-            start = max(0, int(start) if start else 0)
-            end = max(start, int(end) if end else file_size - 1)
+            start_str, end_str = range_header.replace("bytes=", "").split("-", 1)
+            start = max(0, int(start_str) if start_str else 0)
+            end = min(int(end_str) if end_str else file_size - 1, file_size - 1)
         except ValueError:
             start, end = 0, file_size - 1
-
-        end = min(end, file_size - 1)
 
         length = end - start + 1
         with open(full_path, "rb") as f:
@@ -336,7 +371,7 @@ def get_video(path: str, range: Optional[str] = Query(None)):
         return Response(
             content=data,
             status_code=206,
-            media_type="video/mp4",
+            media_type=mime,
             headers={
                 "Content-Range": f"bytes {start}-{end}/{file_size}",
                 "Accept-Ranges": "bytes",
@@ -351,7 +386,7 @@ def get_video(path: str, range: Optional[str] = Query(None)):
 
     return Response(
         content=iterfile(),
-        media_type="video/mp4",
+        media_type=mime,
         headers={
             "Content-Length": str(file_size),
             "Accept-Ranges": "bytes",
@@ -929,6 +964,48 @@ def storage_stats():
         vehicles=vehicle_info,
         by_vehicle=by_vehicle,
     )
+
+
+@app.delete("/api/clips/{clip_id}")
+def delete_clip(clip_id: str):
+    clips, _, _ = get_all_clips(limit=50000)
+    clip = next((c for c in clips if c.id == clip_id and c.source in (None, "local")), None)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found or not a local clip")
+    full_path = _resolve_clip_path(clip.relativePath)
+    if full_path and os.path.exists(full_path):
+        os.remove(full_path)
+        parent = Path(full_path).parent
+        try:
+            if not any(parent.iterdir()):
+                parent.rmdir()
+        except Exception:
+            pass
+    delete_clip_from_db(clip_id)
+    return {"status": "deleted", "id": clip_id}
+
+
+@app.delete("/api/events/{event_key:path}")
+def delete_event(event_key: str):
+    event_key = urllib.parse.unquote(event_key)
+    clips, _, _ = get_all_clips(limit=50000)
+    event_clips = [c for c in clips if c.eventKey == event_key and c.source in (None, "local")]
+    if not event_clips:
+        raise HTTPException(status_code=404, detail="Event not found or not a local event")
+    deleted_files = 0
+    for clip in event_clips:
+        full_path = _resolve_clip_path(clip.relativePath)
+        if full_path and os.path.exists(full_path):
+            os.remove(full_path)
+            deleted_files += 1
+            parent = Path(full_path).parent
+            try:
+                if not any(parent.iterdir()):
+                    parent.rmdir()
+            except Exception:
+                pass
+    removed = delete_clips_by_event_key(event_key)
+    return {"status": "deleted", "clips_deleted": removed, "files_deleted": deleted_files}
 
 
 @app.get("/api/vehicles")

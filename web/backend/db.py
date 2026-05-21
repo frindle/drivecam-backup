@@ -545,3 +545,18 @@ def update_imported_clip_paths(path_updates: list) -> None:
                 "UPDATE imported_clips SET file_path = ? WHERE file_path = ?",
                 (new_path, old_path),
             )
+
+
+def delete_clip_from_db(clip_id: str) -> bool:
+    with _get_conn() as conn:
+        cur = conn.execute("DELETE FROM clips WHERE id = ?", (clip_id,))
+        return cur.rowcount > 0
+
+
+def delete_clips_by_event_key(event_key: str) -> int:
+    with _get_conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM clips WHERE json_extract(data, '$.eventKey') = ?",
+            (event_key,),
+        )
+        return cur.rowcount
