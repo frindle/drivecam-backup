@@ -1172,10 +1172,12 @@ def storage_stats():
 
     recording_hours = 0.0
     bytes_per_recording_hour = 0.0
-    clips_with_dur = [c for c in clips if c.duration is not None]
-    if clips_with_dur:
-        total_dur_secs = sum(c.duration for c in clips_with_dur)
-        total_size_with_dur = sum(c.size for c in clips_with_dur)
+    reencoded_ids = get_reencoded_ids()
+    # Use only original (non-re-encoded) clips so the rate reflects actual recording bitrate
+    original_with_dur = [c for c in clips if c.duration is not None and c.id not in reencoded_ids]
+    if original_with_dur:
+        total_dur_secs = sum(c.duration for c in original_with_dur)
+        total_size_with_dur = sum(c.size for c in original_with_dur)
         recording_hours = total_dur_secs / 3600
         if total_dur_secs > 0:
             bytes_per_recording_hour = total_size_with_dur / total_dur_secs * 3600
@@ -1428,6 +1430,8 @@ async def update_app_settings(request: Request):
     old_settings = get_settings()
     updates = {k: v for k, v in body.items() if k in allowed}
     result = set_settings(updates)
+    result["data_path"] = DATA_PATH
+    result["ingest_path"] = INGEST_PATH
     reencode_just_enabled = (
         updates.get("reencode_enabled", "").lower() == "true"
         and old_settings.get("reencode_enabled", "false").lower() != "true"
