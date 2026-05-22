@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { getEvents, getClips, getHealth, triggerScan, clearCache, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, checkImported, getStorageStats, getVehicleLabels, reassignVehicle, deleteVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus, getAppSettings, updateAppSettings, getReencodeStatus } from './api'
+import { getEvents, getClips, getHealth, triggerScan, clearCache, getShares, createShare, updateShare, deleteShare, testShare, getScanStatus, getCloudProviders, createCloudProvider, updateCloudProvider, deleteCloudProvider, testCloudProvider, syncCloudProvider, getCloudOAuthUrl, uploadFiles, checkImported, getStorageStats, getVehicleLabels, reassignVehicle, deleteVehicle, deleteClip, deleteEvent, getRetentionSettings, setRetention, runPurgeNow, getIngestStatus, getAppSettings, updateAppSettings, getReencodeStatus, stopReencode } from './api'
 
 const EVENT_COLORS = {
   driving: '#3b82f6',
@@ -129,6 +129,7 @@ function StorageCalculator({ stats }) {
 }
 
 function ReencodeStatus({ status }) {
+  const [stopping, setStopping] = useState(false)
   if (!status || !status.running) return null
   const { done, total, etaSeconds, savedBytes } = status
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
@@ -142,9 +143,22 @@ function ReencodeStatus({ status }) {
 
   const saved = savedBytes > 0 ? ` · ${byteCountFmt(savedBytes)} saved` : ''
 
+  const handleStop = async () => {
+    setStopping(true)
+    try { await stopReencode() } catch {}
+  }
+
   return (
     <span className="reencode-chip" title={`Re-encoding ${done}/${total} clips${saved}`}>
       ⚙️ {done}/{total} ({pct}%){eta ? ` ${eta}` : ''}{saved}
+      <button
+        className="reencode-stop-btn"
+        onClick={handleStop}
+        disabled={stopping}
+        title="Stop re-encoding after current clip"
+      >
+        {stopping ? '…' : '⏹'}
+      </button>
     </span>
   )
 }
@@ -1152,10 +1166,22 @@ function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
     }
   }
 
+  function handlePlayPauseAll() {
+    const refs = Object.values(videosRef.current).filter(Boolean)
+    if (refs.length === 0) return
+    if (playing) {
+      refs.forEach(v => v.pause())
+    } else {
+      const leader = videosRef.current[uniqueAngles[0]]
+      const t = leader?.currentTime || 0
+      refs.forEach(v => { v.currentTime = t; v.play().catch(() => {}) })
+    }
+  }
+
   function handleTimeUpdate() {
     if (multiCam) {
-      const first = Object.values(videosRef.current)[0]
-      if (first) syncAll(first.currentTime)
+      const leader = videosRef.current[uniqueAngles[0]]
+      if (leader) syncAll(leader.currentTime)
     }
   }
 
@@ -1221,33 +1247,40 @@ function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
 
         <div className="event-detail-body">
           {multiCam ? (
-            <div className="multicam-grid">
-              {uniqueAngles.map(angle => {
-                const angleClips = clipsByAngle[angle]
-                const clip = angleClips[Math.min(chunkIdx, angleClips.length - 1)]
-                return (
-                  <div key={angle} className="multicam-pane">
-                    <video
-                      key={clip.id}
-                      ref={el => { if (el) videosRef.current[angle] = el }}
-                      src={clip.downloadUrl}
-                      controls={false}
-                      muted
-                      onTimeUpdate={handleTimeUpdate}
-                      onPlay={() => setPlaying(true)}
-                      onPause={() => setPlaying(false)}
-                      onEnded={() => {
-                        if (angle === uniqueAngles[0] && chunkIdx < totalChunks - 1) {
-                          setChunkIdx(i => i + 1)
-                        }
-                      }}
-                      onClick={e => { e.target.paused ? e.target.play() : e.target.pause() }}
-                    />
-                    <div className="multicam-label">{CAMERA_LABELS[angle] || angle}</div>
-                  </div>
-                )
-              })}
-            </div>
+            <>
+              <div className="multicam-grid">
+                {uniqueAngles.map(angle => {
+                  const angleClips = clipsByAngle[angle]
+                  const clip = angleClips[Math.min(chunkIdx, angleClips.length - 1)]
+                  return (
+                    <div key={angle} className="multicam-pane">
+                      <video
+                        key={clip.id}
+                        ref={el => { if (el) videosRef.current[angle] = el }}
+                        src={clip.downloadUrl}
+                        controls={false}
+                        muted
+                        onTimeUpdate={handleTimeUpdate}
+                        onPlay={() => setPlaying(true)}
+                        onPause={() => setPlaying(false)}
+                        onEnded={() => {
+                          if (angle === uniqueAngles[0] && chunkIdx < totalChunks - 1) {
+                            setChunkIdx(i => i + 1)
+                          }
+                        }}
+                        onClick={handlePlayPauseAll}
+                      />
+                      <div className="multicam-label">{CAMERA_LABELS[angle] || angle}</div>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="multicam-controls">
+                <button className="btn btn-nav multicam-play-btn" onClick={handlePlayPauseAll}>
+                  {playing ? '⏸' : '▶'}
+                </button>
+              </div>
+            </>
           ) : (
             <div className="modal-video-wrap">
               <video
@@ -1296,6 +1329,14 @@ function EventDetail({ event, allEvents, onClose, onNavigate, onDeleted }) {
               {!selectMode && totalChunks > 1 && (
                 <span className="chunk-nav">
                   <button className="btn btn-nav" onClick={() => setChunkIdx(i => Math.max(0, i - 1))} disabled={chunkIdx === 0}>◀</button>
+                  <input
+                    type="range"
+                    className="chunk-slider"
+                    min={0}
+                    max={totalChunks - 1}
+                    value={chunkIdx}
+                    onChange={e => setChunkIdx(Number(e.target.value))}
+                  />
                   <span className="chunk-label">{chunkIdx + 1}/{totalChunks}</span>
                   <button className="btn btn-nav" onClick={() => setChunkIdx(i => Math.min(totalChunks - 1, i + 1))} disabled={chunkIdx === totalChunks - 1}>▶</button>
                 </span>

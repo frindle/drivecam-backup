@@ -234,6 +234,7 @@ _reencode_state: dict = {
     "current": None,
     "start_time": None,
     "saved_bytes": 0,
+    "stop_requested": False,
 }
 
 
@@ -241,9 +242,6 @@ def _check_nvenc() -> bool:
     global _nvenc_available
     if _nvenc_available is not None:
         return _nvenc_available
-    if not _use_cuda():
-        _nvenc_available = False
-        return False
     ffmpeg = _check_ffmpeg()
     if not ffmpeg:
         _nvenc_available = False
@@ -319,9 +317,12 @@ def _reencode_old_clips_bg() -> None:
         if not pending:
             return
         print(f"Re-encode: {len(pending)} clips eligible (>{14}d old), encoder={encoder}")
-        _reencode_state.update({"running": True, "total": len(pending), "done": 0, "current": None, "start_time": time.time(), "saved_bytes": 0})
+        _reencode_state.update({"running": True, "total": len(pending), "done": 0, "current": None, "start_time": time.time(), "saved_bytes": 0, "stop_requested": False})
         done = saved_bytes = 0
         for clip in pending:
+            if _reencode_state.get("stop_requested"):
+                print(f"Re-encode: stopped by user after {done} clips")
+                break
             for base in DATA_PATHS:
                 full = os.path.join(base, clip.relativePath)
                 if os.path.exists(full):
@@ -567,6 +568,12 @@ def reencode_status():
         "savedBytes": s["saved_bytes"],
         "etaSeconds": eta_seconds,
     }
+
+
+@app.post("/api/reencode/stop")
+def stop_reencode():
+    _reencode_state["stop_requested"] = True
+    return {"status": "stop_requested"}
 
 
 @app.get("/api/clips/{path:path}/thumbnail")

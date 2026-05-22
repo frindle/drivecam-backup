@@ -233,6 +233,12 @@ export async function getReencodeStatus() {
   return apiFetch('/reencode/status');
 }
 
+export async function stopReencode() {
+  const res = await fetch(`${BASE}/reencode/stop`, { method: 'POST' });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
 export async function getAppSettings() {
   return apiFetch('/settings');
 }
