@@ -2,7 +2,7 @@
 # Run:   docker compose up
 # Requires nvidia-container-toolkit on the host and "nvidia" runtime configured
 
-FROM ubuntu:22.04 AS base
+FROM ubuntu:26.04 AS base
 
 WORKDIR /app
 
