@@ -1,4 +1,4 @@
-fastapi==0.109.2
+fastapi==0.140.0
 uvicorn==0.27.1
 pydantic==2.6.1
 smbprotocol>=1.12.0
