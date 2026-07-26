@@ -1,5 +1,5 @@
 fastapi==0.109.2
 uvicorn==0.27.1
 pydantic==2.6.1
-smbprotocol>=1.12.0
+smbprotocol>=1.17.0
 aioftp>=0.22.0
