@@ -7,7 +7,7 @@ FROM ubuntu:22.04 AS base
 WORKDIR /app
 
 # ── Stage 1: Build React frontend ───────────────────────
-FROM node:20-alpine AS frontend
+FROM node:26-alpine AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install --no-audit --no-fund
