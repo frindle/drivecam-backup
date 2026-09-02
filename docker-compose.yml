@@ -2,6 +2,8 @@ services:
   drivecam-web:
     image: ghcr.io/frindle/drivecam-backup/drivecam-web:latest
     container_name: drivecam-web
+    labels:
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/frindle/drivecam-backup/main/icon.png"
     ports:
       - "8000:8000"
     volumes:
