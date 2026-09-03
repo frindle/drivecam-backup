@@ -4,15 +4,27 @@ updates:
     directory: "/web"
     schedule:
       interval: "weekly"
+    groups:
+      pip-all:
+        patterns: ["*"]
   - package-ecosystem: "docker"
     directory: "/web"
     schedule:
       interval: "weekly"
+    groups:
+      docker-all:
+        patterns: ["*"]
   - package-ecosystem: "npm"
     directory: "/web/frontend"
     schedule:
       interval: "weekly"
+    groups:
+      npm-all:
+        patterns: ["*"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      github-actions-all:
+        patterns: ["*"]
