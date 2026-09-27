@@ -2,12 +2,12 @@
 # Run:   docker compose up
 # Requires nvidia-container-toolkit on the host and "nvidia" runtime configured
 
-FROM ubuntu:22.04 AS base
+FROM ubuntu:26.04 AS base
 
 WORKDIR /app
 
 # ── Stage 1: Build React frontend ───────────────────────
-FROM node:20-alpine AS frontend
+FROM node:26-alpine AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install --no-audit --no-fund
