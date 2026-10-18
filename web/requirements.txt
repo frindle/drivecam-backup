@@ -1,5 +1,5 @@
-fastapi==0.142.4
+fastapi==0.143.1
 uvicorn==0.54.0
-pydantic==2.13.5
+pydantic==2.14.1
 smbprotocol>=1.17.0
 aioftp>=0.28.3
